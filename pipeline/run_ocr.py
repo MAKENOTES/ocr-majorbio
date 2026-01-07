@@ -15,6 +15,17 @@ from pipeline.export import export_json
 
 
 def _crop_image(image_path: str, bbox: List[int], out_dir: str, idx: int) -> str:
+    """按 bbox 裁剪图片并保存，返回裁剪图路径。
+
+    Args:
+        image_path: 原图路径。
+        bbox: 目标框 [x1, y1, x2, y2]。
+        out_dir: 输出目录。
+        idx: 裁剪编号。
+
+    Returns:
+        裁剪图路径。
+    """
     image = Image.open(image_path)
     x1, y1, x2, y2 = bbox
     crop = image.crop((x1, y1, x2, y2))
@@ -24,6 +35,15 @@ def _crop_image(image_path: str, bbox: List[int], out_dir: str, idx: int) -> str
 
 
 def run_ocr_on_pdf(pdf_path: str, config_path: str) -> List[Dict]:
+    """执行 PDF OCR 全流程并返回结构化结果列表。
+
+    Args:
+        pdf_path: PDF 文件路径。
+        config_path: 配置文件路径。
+
+    Returns:
+        结构化 OCR 结果列表。
+    """
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -70,6 +90,7 @@ def run_ocr_on_pdf(pdf_path: str, config_path: str) -> List[Dict]:
 
 
 def main() -> None:
+    """命令行入口：对指定 PDF 执行 OCR。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--pdf", required=True)
     parser.add_argument("--config", default="configs/pipeline.yaml")

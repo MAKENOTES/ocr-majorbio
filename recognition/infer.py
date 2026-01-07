@@ -12,6 +12,16 @@ from recognition.models.crnn_ctc import CRNNCTC
 
 
 def _prepare_image(image: Image.Image, img_height: int, max_width: int) -> torch.Tensor:
+    """将输入图像缩放到固定高度并转为模型张量。
+
+    Args:
+        image: PIL 图像。
+        img_height: 目标高度。
+        max_width: 最大宽度。
+
+    Returns:
+        归一化后的张量。
+    """
     w, h = image.size
     new_w = min(int(w * (img_height / h)), max_width)
     image = image.resize((new_w, img_height))
@@ -22,6 +32,18 @@ def _prepare_image(image: Image.Image, img_height: int, max_width: int) -> torch
 
 
 def recognize_text(crop_path: str, model_path: str, vocab_path: str, img_height: int = 32, max_width: int = 1000) -> Dict:
+    """对单张裁剪图进行识别并返回文本与分数。
+
+    Args:
+        crop_path: 裁剪图路径。
+        model_path: 模型权重路径。
+        vocab_path: 字符表路径。
+        img_height: 输入高度。
+        max_width: 最大宽度。
+
+    Returns:
+        识别结果字典（text/score）。
+    """
     image = Image.open(crop_path).convert("L")
     vocab = load_vocab(vocab_path)
 
@@ -40,6 +62,7 @@ def recognize_text(crop_path: str, model_path: str, vocab_path: str, img_height:
 
 
 def main() -> None:
+    """命令行入口：对单张裁剪图进行识别测试。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
     parser.add_argument("--model", required=True)

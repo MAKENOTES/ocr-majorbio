@@ -4,6 +4,7 @@ import sys
 
 
 def main() -> None:
+    """命令行入口：调用 MMOCR 训练脚本进行检测训练。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/mmocr_dbnet_resnet18_contract.py")
     parser.add_argument("--work_dir", default="outputs/det_preds/mmocr_dbnet")

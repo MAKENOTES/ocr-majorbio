@@ -12,6 +12,16 @@ from detection.postprocess import postprocess_dummy
 
 
 def detect_text(image_path: str, model_path: str, conf_thresh: float = 0.3) -> List[Dict]:
+    """检测文本并返回包含 bbox/polygon/score 的结果列表。
+
+    Args:
+        image_path: 输入图像路径。
+        model_path: 模型权重路径。
+        conf_thresh: 置信度阈值（占位参数）。
+
+    Returns:
+        检测结果列表。
+    """
     image = Image.open(image_path).convert("RGB")
     w, h = image.size
 
@@ -31,6 +41,7 @@ def detect_text(image_path: str, model_path: str, conf_thresh: float = 0.3) -> L
 
 
 def main() -> None:
+    """命令行入口：对单张图片进行检测测试。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
     parser.add_argument("--model", required=True)

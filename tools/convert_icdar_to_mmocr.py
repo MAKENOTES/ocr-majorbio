@@ -12,6 +12,16 @@ def _parse_icdar_label(
     ignore_tokens: List[str],
     assume_bbox_only: bool,
 ) -> List[Dict]:
+    """解析 ICDAR 标注文本，输出 MMOCR 所需的 instances 列表。
+
+    Args:
+        label_path: 标注文件路径。
+        ignore_tokens: 忽略文本标记列表（如 ###）。
+        assume_bbox_only: 是否仅按 x1 y1 x2 y2 解析。
+
+    Returns:
+        MMOCR 需要的 instances 列表。
+    """
     instances: List[Dict] = []
     if not label_path.exists():
         return instances
@@ -62,8 +72,21 @@ def _build_data_list(
     ignore_tokens: List[str],
     assume_bbox_only: bool,
 ) -> List[Dict]:
+    """构建 MMOCR 的 data_list 结构。
+
+    Args:
+        images: 图像路径列表。
+        labels_dir: 标注目录。
+        label_prefix: 标注文件前缀。
+        ignore_tokens: 忽略文本标记列表。
+        assume_bbox_only: 是否仅按矩形框解析。
+
+    Returns:
+        MMOCR 的 data_list 列表。
+    """
     data_list: List[Dict] = []
     for image_path in images:
+        # 读取图像尺寸，写入到 annotation 中
         with Image.open(image_path) as im:
             width, height = im.size
         label_name = f"{label_prefix}{image_path.stem}.txt"
@@ -84,6 +107,12 @@ def _build_data_list(
 
 
 def _write_json(out_path: Path, data_list: List[Dict]) -> None:
+    """写出 MMOCR JSON 文件（含 metainfo + data_list）。
+
+    Args:
+        out_path: 输出 JSON 路径。
+        data_list: MMOCR data_list 数据。
+    """
     out = {
         "metainfo": {
             "dataset_type": "custom_icdar",
@@ -97,6 +126,7 @@ def _write_json(out_path: Path, data_list: List[Dict]) -> None:
 
 
 def main() -> None:
+    """命令行入口：转换 ICDAR 标注为 MMOCR JSON。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--images_dir", required=True)
     parser.add_argument("--labels_dir", required=True)
@@ -113,6 +143,7 @@ def main() -> None:
     labels_dir = Path(args.labels_dir)
     images = sorted([p for p in images_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}])
 
+    # 按固定随机种子打乱，便于稳定划分训练/验证
     random.seed(args.seed)
     random.shuffle(images)
 
@@ -120,6 +151,7 @@ def main() -> None:
     train_images = images[:split_idx]
     val_images = images[split_idx:]
 
+    # ICDAR 常用的忽略标记
     ignore_tokens = ["###"]
 
     train_list = _build_data_list(
@@ -137,6 +169,7 @@ def main() -> None:
         assume_bbox_only=args.bbox_only,
     )
 
+    # 输出 JSON 文件
     _write_json(Path(args.out_train_json), train_list)
     _write_json(Path(args.out_val_json), val_list)
 

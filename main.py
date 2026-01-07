@@ -4,6 +4,7 @@ from pipeline.run_ocr import run_ocr_on_pdf
 
 
 def main() -> None:
+    """命令行入口：调用 OCR pipeline。"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--pdf", required=True)
     parser.add_argument("--config", default="configs/pipeline.yaml")

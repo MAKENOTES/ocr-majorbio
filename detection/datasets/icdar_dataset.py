@@ -16,6 +16,14 @@ class ICDARBox:
 
 
 def _parse_icdar_label(label_path: str) -> List[ICDARBox]:
+    """解析 ICDAR 标注文件，返回文本框列表。
+
+    Args:
+        label_path: 标注文件路径。
+
+    Returns:
+        ICDARBox 列表。
+    """
     boxes: List[ICDARBox] = []
     with open(label_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -34,15 +42,31 @@ def _parse_icdar_label(label_path: str) -> List[ICDARBox]:
 
 class ICDARDataset(Dataset):
     def __init__(self, images_dir: str, labels_dir: str, label_prefix: str = ""):
+        """构建 ICDAR 数据集对象。
+
+        Args:
+            images_dir: 图像目录路径。
+            labels_dir: 标注目录路径。
+            label_prefix: 标注文件名前缀。
+        """
         self.images_dir = Path(images_dir)
         self.labels_dir = Path(labels_dir)
         self.label_prefix = label_prefix
         self.images = sorted([p for p in self.images_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}])
 
     def __len__(self) -> int:
+        """返回数据集长度。"""
         return len(self.images)
 
     def __getitem__(self, idx: int):
+        """返回指定索引的数据样本（图像、标注、路径）。
+
+        Args:
+            idx: 数据索引。
+
+        Returns:
+            (image, boxes, image_path)。
+        """
         image_path = self.images[idx]
         label_name = f"{self.label_prefix}{image_path.stem}.txt"
         label_path = self.labels_dir / label_name
