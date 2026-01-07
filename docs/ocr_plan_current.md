@@ -119,6 +119,28 @@ python tools/select_best_epoch.py --work_dir outputs/det_preds/mmocr_dbnet
 
 ---
 
+## 6.1 关键脚本使用说明（汇总）
+> 当前所有工具脚本均改为“代码内默认参数”方式运行，无需命令行传参。\n
+1) **PDF 渲染**：`tools/pdf_to_images.py`\n
+   - 默认：`data/pdfs/example.pdf` -> `data/images`，DPI=300\n
+2) **标注转换**：`tools/convert_icdar_to_mmocr.py`\n
+   - 默认：`data/images` / `data/det_labels`，前缀 `gt_`\n
+   - 输出：`data/mmocr/textdet_train.json` / `data/mmocr/textdet_val.json`\n
+   - 默认开启 `bbox_only`（矩形标注）\n
+3) **裁剪识别训练样本**：`tools/make_rec_dataset.py`\n
+   - 默认：`data/images/000001.jpg`\n
+   - 默认检测 JSON：`outputs/det_preds/sample_det.json`\n
+   - 输出：`data/crops`\n
+4) **检测结果可视化**：`tools/vis_debug.py`\n
+   - 默认输入：`data/images/000001.jpg`\n
+   - 默认 JSON：`outputs/det_preds/sample_det.json`\n
+   - 输出：`outputs/det_preds/vis_000001.jpg`\n
+5) **选择最佳模型**：`tools/select_best_epoch.py`\n
+   - 默认目录：`outputs/det_preds/mmocr_dbnet`\n
+   - 自动生成：`best.pth` 软链接\n
+
+---
+
 ## 7. 推理验证召回
 建议使用低阈值进行验证：
 ```

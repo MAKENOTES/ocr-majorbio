@@ -1,4 +1,3 @@
-import argparse
 import json
 import random
 from pathlib import Path
@@ -126,28 +125,30 @@ def _write_json(out_path: Path, data_list: List[Dict]) -> None:
 
 
 def main() -> None:
-    """命令行入口：转换 ICDAR 标注为 MMOCR JSON。"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--images_dir", required=True)
-    parser.add_argument("--labels_dir", required=True)
-    parser.add_argument("--label_prefix", default="gt_")
-    parser.add_argument("--out_train_json", required=True)
-    parser.add_argument("--out_val_json", required=True)
-    parser.add_argument("--val_ratio", type=float, default=0.1)
-    parser.add_argument("--seed", type=int, default=42)
-    # 如果标注仅为 x1 y1 x2 y2（无 polygon），启用此开关
-    parser.add_argument("--bbox_only", action="store_true")
-    args = parser.parse_args()
+    """脚本入口：按代码内默认参数转换标注。"""
+    # 图像目录
+    images_dir = Path("data/images")
+    # 标注目录
+    labels_dir = Path("data/det_labels")
+    # 标注文件名前缀
+    label_prefix = "gt_"
+    # 输出 JSON 路径
+    out_train_json = "data/mmocr/textdet_train.json"
+    out_val_json = "data/mmocr/textdet_val.json"
+    # 验证集比例
+    val_ratio = 0.1
+    # 随机种子
+    seed = 42
+    # 标注是否只有矩形框
+    bbox_only = True
 
-    images_dir = Path(args.images_dir)
-    labels_dir = Path(args.labels_dir)
     images = sorted([p for p in images_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}])
 
     # 按固定随机种子打乱，便于稳定划分训练/验证
-    random.seed(args.seed)
+    random.seed(seed)
     random.shuffle(images)
 
-    split_idx = int(len(images) * (1 - args.val_ratio))
+    split_idx = int(len(images) * (1 - val_ratio))
     train_images = images[:split_idx]
     val_images = images[split_idx:]
 
@@ -157,21 +158,21 @@ def main() -> None:
     train_list = _build_data_list(
         train_images,
         labels_dir,
-        args.label_prefix,
+        label_prefix,
         ignore_tokens,
-        assume_bbox_only=args.bbox_only,
+        assume_bbox_only=bbox_only,
     )
     val_list = _build_data_list(
         val_images,
         labels_dir,
-        args.label_prefix,
+        label_prefix,
         ignore_tokens,
-        assume_bbox_only=args.bbox_only,
+        assume_bbox_only=bbox_only,
     )
 
     # 输出 JSON 文件
-    _write_json(Path(args.out_train_json), train_list)
-    _write_json(Path(args.out_val_json), val_list)
+    _write_json(Path(out_train_json), train_list)
+    _write_json(Path(out_val_json), val_list)
 
     print(f"Train images: {len(train_images)}, Val images: {len(val_images)}")
 

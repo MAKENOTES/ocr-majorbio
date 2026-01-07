@@ -1,5 +1,3 @@
-import argparse
-from pathlib import Path
 from typing import List, Dict
 import json
 
@@ -25,18 +23,18 @@ def draw_boxes(image_path: str, dets: List[Dict], out_path: str) -> None:
 
 
 def main() -> None:
-    """命令行入口：可视化检测 JSON 到图像。"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--image", required=True)
-    parser.add_argument("--json", required=True)
-    parser.add_argument("--out", required=True)
-    args = parser.parse_args()
+    """脚本入口：按代码内默认参数可视化检测结果。"""
+    # 原图路径
+    image_path = "data/images/000001.jpg"
+    # 检测 JSON 路径
+    det_json = "outputs/det_preds/sample_det.json"
+    # 输出路径
+    out_path = "outputs/det_preds/vis_000001.jpg"
 
     # 读取检测结果并可视化
-    # 读取 JSON 检测结果
-    dets = json.load(open(args.json, "r", encoding="utf-8"))
-    draw_boxes(args.image, dets, args.out)
-    print(f"Saved {args.out}")
+    dets = json.load(open(det_json, "r", encoding="utf-8"))
+    draw_boxes(image_path, dets, out_path)
+    print(f"Saved {out_path}")
 
 
 if __name__ == "__main__":

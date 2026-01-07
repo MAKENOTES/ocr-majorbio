@@ -1,5 +1,3 @@
-import argparse
-import os
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -38,16 +36,17 @@ def pdf_to_images(pdf_path: str, out_dir: str, dpi: int = 300) -> list[str]:
 
 
 def main() -> None:
-    """命令行入口：将指定 PDF 渲染为图像。"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--pdf", required=True)
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--dpi", type=int, default=300)
-    args = parser.parse_args()
+    """脚本入口：按代码内默认参数渲染 PDF。"""
+    # 默认 PDF 路径
+    pdf_path = "data/pdfs/example.pdf"
+    # 默认输出目录
+    out_dir = "data/images"
+    # 默认渲染分辨率
+    dpi = 300
 
     # 执行渲染并输出结果路径
-    paths = pdf_to_images(args.pdf, args.out, dpi=args.dpi)
-    print(f"Rendered {len(paths)} pages to {args.out}")
+    paths = pdf_to_images(pdf_path, out_dir, dpi=dpi)
+    print(f"Rendered {len(paths)} pages to {out_dir}")
 
 
 if __name__ == "__main__":

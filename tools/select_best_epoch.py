@@ -1,4 +1,3 @@
-import argparse
 import os
 import re
 from pathlib import Path
@@ -51,15 +50,14 @@ def _parse_best_epoch(log_path: Path) -> tuple[int, float]:
 
 
 def main() -> None:
-    """命令行入口：从日志中选出最佳 epoch 并生成 best.pth。"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--work_dir", required=True)
-    parser.add_argument("--log", default=None)
-    args = parser.parse_args()
+    """脚本入口：按代码内默认参数选出最佳 epoch。"""
+    # 训练工作目录
+    work_dir = Path("outputs/det_preds/mmocr_dbnet")
+    # 可选：指定日志路径（None 表示自动寻找最新）
+    log_path = None
 
-    work_dir = Path(args.work_dir)
     # 未指定日志时，默认取最新日志
-    log_path = Path(args.log) if args.log else _find_latest_log(work_dir)
+    log_path = Path(log_path) if log_path else _find_latest_log(work_dir)
 
     best_epoch, best_hmean = _parse_best_epoch(log_path)
     ckpt_name = f"epoch_{best_epoch}.pth"
