@@ -7,7 +7,11 @@ from typing import List, Dict
 from PIL import Image
 
 
-def _parse_icdar_label(label_path: Path, ignore_tokens: List[str]) -> List[Dict]:
+def _parse_icdar_label(
+    label_path: Path,
+    ignore_tokens: List[str],
+    assume_bbox_only: bool,
+) -> List[Dict]:
     instances: List[Dict] = []
     if not label_path.exists():
         return instances
@@ -17,7 +21,8 @@ def _parse_icdar_label(label_path: Path, ignore_tokens: List[str]) -> List[Dict]
             line = line.strip()
             if not line:
                 continue
-            if "," in line:
+            if not assume_bbox_only and "," in line:
+                # ICDAR Localization: x1,y1,...,x4,y4,text
                 parts = line.split(",")
                 if len(parts) < 9:
                     continue
@@ -30,6 +35,7 @@ def _parse_icdar_label(label_path: Path, ignore_tokens: List[str]) -> List[Dict]
                 y1, y2 = min(ys), max(ys)
                 ignore = text in ignore_tokens
             else:
+                # 兼容简单四点框：x1 y1 x2 y2（无文字）
                 parts = line.split()
                 if len(parts) < 4:
                     continue
@@ -49,13 +55,23 @@ def _parse_icdar_label(label_path: Path, ignore_tokens: List[str]) -> List[Dict]
     return instances
 
 
-def _build_data_list(images: List[Path], labels_dir: Path, label_prefix: str, ignore_tokens: List[str]) -> List[Dict]:
+def _build_data_list(
+    images: List[Path],
+    labels_dir: Path,
+    label_prefix: str,
+    ignore_tokens: List[str],
+    assume_bbox_only: bool,
+) -> List[Dict]:
     data_list: List[Dict] = []
     for image_path in images:
         with Image.open(image_path) as im:
             width, height = im.size
         label_name = f"{label_prefix}{image_path.stem}.txt"
-        instances = _parse_icdar_label(labels_dir / label_name, ignore_tokens)
+        instances = _parse_icdar_label(
+            labels_dir / label_name,
+            ignore_tokens,
+            assume_bbox_only=assume_bbox_only,
+        )
         data_list.append(
             {
                 "img_path": str(image_path.as_posix()),
@@ -89,6 +105,8 @@ def main() -> None:
     parser.add_argument("--out_val_json", required=True)
     parser.add_argument("--val_ratio", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
+    # 如果标注仅为 x1 y1 x2 y2（无 polygon），启用此开关
+    parser.add_argument("--bbox_only", action="store_true")
     args = parser.parse_args()
 
     images_dir = Path(args.images_dir)
@@ -104,8 +122,20 @@ def main() -> None:
 
     ignore_tokens = ["###"]
 
-    train_list = _build_data_list(train_images, labels_dir, args.label_prefix, ignore_tokens)
-    val_list = _build_data_list(val_images, labels_dir, args.label_prefix, ignore_tokens)
+    train_list = _build_data_list(
+        train_images,
+        labels_dir,
+        args.label_prefix,
+        ignore_tokens,
+        assume_bbox_only=args.bbox_only,
+    )
+    val_list = _build_data_list(
+        val_images,
+        labels_dir,
+        args.label_prefix,
+        ignore_tokens,
+        assume_bbox_only=args.bbox_only,
+    )
 
     _write_json(Path(args.out_train_json), train_list)
     _write_json(Path(args.out_val_json), val_list)

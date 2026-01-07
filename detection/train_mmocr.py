@@ -10,6 +10,7 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
+    # 使用 MMOCR 自带训练入口，保持和官方流程一致
     cmd = [
         sys.executable,
         "third_party/mmocr/tools/train.py",
@@ -17,6 +18,7 @@ def main() -> None:
         "--work-dir",
         args.work_dir,
     ]
+    # 支持断点恢复训练
     if args.resume:
         cmd.append("--resume")
 
