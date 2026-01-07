@@ -1,9 +1,13 @@
 ### IntelliJ IDEA ###
 .idea
-
+.vscode
 .venv
 __pycache__/
 dataset/
+third_party/
+outputs/
+data/
+
 
 
 

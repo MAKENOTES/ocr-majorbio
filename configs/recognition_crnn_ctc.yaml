@@ -1,0 +1,23 @@
+model:
+  name: crnn_ctc
+  backbone: resnet
+  hidden_size: 256
+
+train:
+  batch_size: 128
+  num_epochs: 50
+  lr: 0.001
+  img_height: 32
+  max_width: 1000
+
+ctc:
+  blank_id: 0
+
+data:
+  train_images: data/crops
+  train_labels: data/rec_labels/labels.txt
+  val_images: data/crops
+  val_labels: data/rec_labels/labels.txt
+
+vocab:
+  path: data/vocab/vocab.txt
