@@ -1,27 +1,17 @@
 model:
-  name: dbnet
-  backbone: resnet18
-  pretrained: true
+  name: db_resnet50
 
 train:
   batch_size: 8
-  num_epochs: 50
-  lr: 0.001
-  img_size: 640
-  rotate_deg: 0
-
-loss:
-  bce_weight: 1.0
-  l1_weight: 10.0
-  dice_weight: 1.0
+  num_workers: 4
+  epochs: 200
+  lr: 0.0001
+  device: cuda
+  save_dir: outputs/doctr_det
+  save_every: 1
+  max_steps: 10
 
 data:
-  train_images: data/images
-  train_labels: data/det_labels
-  val_images: data/images
-  val_labels: data/det_labels
+  images_dir: data/images
+  labels_dir: data/det_labels
   label_prefix: gt_
-
-postprocess:
-  binarize_thresh: 0.3
-  box_thresh: 0.5
