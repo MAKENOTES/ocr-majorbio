@@ -1,6 +1,0 @@
-pymupdf
-pillow
-pyyaml
-numpy<2
-opencv-python<5
-python-doctr
