@@ -11,7 +11,7 @@ from utils.loss import EASTLoss
 # --- 超参数 ---
 LEARNING_RATE = 1e-4
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
-EPOCHS = 50
+EPOCHS = 100
 INPUT_SIZE = 512
 TRAIN_IMAGE_DIR = "data/train_images"
 TRAIN_LABEL_DIR = "data/train_labels"
@@ -82,9 +82,9 @@ def main():
                 true_geo_maps, pred_geo_maps
             )
             
-            # 反向传播和优化
+            # 反向传播和优化 计算梯度
             loss.backward()
-            # 优化器都会根据计算出的梯度微调模型的权重
+            # 学习发生的关键时刻, 每一个 batch,  优化器都会根据计算出的梯度微调模型的权重
             optimizer.step()
             
             # 更新 epoch 的总损失

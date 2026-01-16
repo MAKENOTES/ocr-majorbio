@@ -70,7 +70,11 @@ class EASTLoss(nn.Module):
         # 所以应该乘以 128 (即 512 * 0.25) 来匹配 true_aabb 的尺度。
         # 如果模型输出Sigmoid后是0.5，乘以128后就是64.0
         # 如果模型输出Sigmoid后是0.234，乘以128后就是30.0
-        pred_aabb = torch.sigmoid(y_pred_geo[:, 0:4, :, :]) * 128
+        
+        # 动态获取特征图的尺寸作为缩放因子
+        # y_true_score 的形状是 [Batch, 1, H, W]
+        feature_map_size = y_true_score.shape[2]
+        pred_aabb = torch.sigmoid(y_pred_geo[:, 0:4, :, :]) * feature_map_size
 
         # 来源 utils/ground_truth.py ，4个方向距离取值范围是0-128
         true_aabb = y_true_geo[:, 0:4, :, :]
