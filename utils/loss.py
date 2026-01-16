@@ -65,7 +65,14 @@ class EASTLoss(nn.Module):
         mask = (y_true_score > 0).float()
         
         # 几何图 (AABB): 4个通道表示距离 (上, 右, 下, 左)
-        pred_aabb = torch.sigmoid(y_pred_geo[:, 0:4, :, :])
+        # true_aabb 是在特征图尺度 (128x128) 上计算的像素距离。
+        # pred_aabb 经过 sigmoid 4个方向距取值范围离是 0~1。（重点）
+        # 所以应该乘以 128 (即 512 * 0.25) 来匹配 true_aabb 的尺度。
+        # 如果模型输出Sigmoid后是0.5，乘以128后就是64.0
+        # 如果模型输出Sigmoid后是0.234，乘以128后就是30.0
+        pred_aabb = torch.sigmoid(y_pred_geo[:, 0:4, :, :]) * 128
+
+        # 来源 utils/ground_truth.py ，4个方向距离取值范围是0-128
         true_aabb = y_true_geo[:, 0:4, :, :]
         
         # 使用真正的 IoU Loss (iou_loss_real)
@@ -135,8 +142,14 @@ class EASTLoss(nn.Module):
         
         union_area = area_pred + area_true - inter_area
         
+        # 增加数值稳定性保护: 防止 union_area <= 0
+        union_area = torch.clamp(union_area, min=eps)
+        
         # 计算 IoU
-        iou = (inter_area + eps) / (union_area + eps)
+        iou = (inter_area + eps) / union_area
+        
+        # 限制 IoU 范围，防止 log(0) 或 log(负数)
+        iou = torch.clamp(iou, min=eps, max=1.0)
         
         # 计算 Loss: -log(IoU)
         iou_loss = -torch.log(iou)
@@ -145,11 +158,15 @@ class EASTLoss(nn.Module):
         if mask.dim() == 4:
             mask = mask.squeeze(1)
             
-        masked_iou_loss = iou_loss * mask
+        # 展平
+        iou_loss = iou_loss.view(-1)
+        mask = mask.view(-1)
         
-        # 归一化
-        num_positive_pixels = torch.sum(mask)
-        if num_positive_pixels == 0:
+        # 只选择正样本
+        pos_indices = mask > 0.5
+        pos_loss = iou_loss[pos_indices]
+        
+        if pos_loss.numel() == 0:
             return torch.tensor(0.0, device=pred_aabb.device)
             
-        return torch.sum(masked_iou_loss) / num_positive_pixels
+        return pos_loss.mean()

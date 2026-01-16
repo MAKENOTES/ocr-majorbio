@@ -84,6 +84,7 @@ def main():
             
             # 反向传播和优化
             loss.backward()
+            # 优化器都会根据计算出的梯度微调模型的权重
             optimizer.step()
             
             # 更新 epoch 的总损失
@@ -93,16 +94,16 @@ def main():
             
             # 更新进度条显示
             progress_bar.set_postfix({
-                '总损失': f"{loss.item():.4f}",
-                '分数损失': f"{score_loss.item():.4f}",
-                '几何损失': f"{geo_loss.item():.4f}"
+                'loss': f"{loss.item():.4f}",
+                'score_loss': f"{score_loss.item():.4f}",
+                'geo_loss': f"{geo_loss.item():.4f}"
             })
             
         # 打印 epoch 的统计数据
         avg_loss = epoch_loss / len(train_loader)
         avg_score_loss = epoch_score_loss / len(train_loader)
         avg_geo_loss = epoch_geo_loss / len(train_loader)
-        print(f"Epoch {epoch+1} 结束: 平均损失: {avg_loss:.4f}, 平均分数损失: {avg_score_loss:.4f}, 平均几何损失: {avg_geo_loss:.4f}")
+        print(f"Epoch {epoch+1} 结束: avg_loss: {avg_loss:.4f}, avg_score_loss: {avg_score_loss:.4f}, avg_geo_loss: {avg_geo_loss:.4f}")
 
         # --- 验证步骤 (可选) ---
         # model.eval()
