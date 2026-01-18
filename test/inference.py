@@ -4,6 +4,7 @@ import numpy as np
 import os
 from PIL import Image
 import sys
+from pathlib import Path
 
 # 添加项目根目录到 sys.path，以便可以导入 models 和 utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,11 +13,11 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-IMAGE_PATH = "data/test_images" # 输入图像路径或目录
-MODEL_PATH = "east_model_epoch_50.pth" # 模型权重路径
+IMAGE_PATH = "data/train_images/000201.jpg" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
+MODEL_PATH = "east_model_epoch_100.pth" # 模型权重路径
 OUTPUT_DIR = "test_results" # 结果保存目录
-INPUT_SIZE = 512 # 输入图像尺寸
-SCORE_THRESHOLD = 0.8 # 分数阈值
+INPUT_SIZE = 1024 # 输入图像尺寸
+SCORE_THRESHOLD = 0.5 # 分数阈值
 NMS_THRESHOLD = 0.2 # NMS 阈值
 
 def load_model(model_path, device):
@@ -147,7 +148,7 @@ def detect(model, image_path, output_dir, input_size=512, score_threshold=0.8, n
     
     for box in final_boxes:
         x_min, y_min, x_max, y_max = box.astype(int)
-        cv2.rectangle(img_cv, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+        cv2.rectangle(img_cv, (x_min, y_min), (x_max, y_max), (0, 255, 0), 1)
         
     # 保存结果
     filename = os.path.basename(image_path)

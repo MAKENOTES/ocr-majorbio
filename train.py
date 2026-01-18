@@ -2,6 +2,7 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import os
 
 from utils.dataset import OCRDataset
 from utils.transforms import get_transforms
@@ -12,9 +13,10 @@ from utils.loss import EASTLoss
 LEARNING_RATE = 1e-4
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
 EPOCHS = 100
-INPUT_SIZE = 512
+INPUT_SIZE = 1024
 TRAIN_IMAGE_DIR = "data/train_images"
 TRAIN_LABEL_DIR = "data/train_labels"
+MAX_KEEP_CHECKPOINTS = 10 # 保留最近的多少个模型检查点
 # 可选: 添加验证集数据目录
 # VAL_IMAGE_DIR = "data/val_images"
 # VAL_LABEL_DIR = "data/val_labels"
@@ -54,6 +56,9 @@ def main():
     criterion = EASTLoss().to(device)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
+    # 用于跟踪保存的模型文件
+    saved_checkpoints = []
+
     # --- 训练循环 ---
     for epoch in range(EPOCHS):
         model.train()
@@ -111,15 +116,23 @@ def main():
         #     # ... 此处编写验证逻辑 ...
         
         # --- 保存模型检查点 ---
-        # 最佳实践是在验证集上性能有提升后才保存模型
-        torch.save(model.state_dict(), f"east_model_epoch_{epoch+1}.pth")
-        print(f"已保存模型检查点至 east_model_epoch_{epoch+1}.pth")
+        checkpoint_filename = f"east_model_epoch_{epoch+1}.pth"
+        torch.save(model.state_dict(), checkpoint_filename)
+        print(f"已保存模型检查点至 {checkpoint_filename}")
+        
+        saved_checkpoints.append(checkpoint_filename)
+        
+        # 如果保存的文件数量超过限制，删除最旧的
+        if len(saved_checkpoints) > MAX_KEEP_CHECKPOINTS:
+            oldest_checkpoint = saved_checkpoints.pop(0)
+            if os.path.exists(oldest_checkpoint):
+                os.remove(oldest_checkpoint)
+                print(f"已删除旧的模型检查点: {oldest_checkpoint}")
 
     print("训练完成!")
 
 if __name__ == '__main__':
     # 确保你的数据目录存在
-    import os
     if not os.path.exists(TRAIN_IMAGE_DIR) or not os.path.exists(TRAIN_LABEL_DIR):
         print(f"错误: 请确保你的数据分别在 '{TRAIN_IMAGE_DIR}' 和 '{TRAIN_LABEL_DIR}' 目录下")
     else:
