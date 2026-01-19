@@ -16,7 +16,11 @@ class EASTModel(nn.Module):
         """
         super(EASTModel, self).__init__()
         # 加载预训练的 ResNet-50，并移除全连接层
-        resnet = models.resnet50(pretrained=pretrained)
+        if pretrained:
+            weights = models.ResNet50_Weights.DEFAULT
+        else:
+            weights = None
+        resnet = models.resnet50(weights=weights)
         self.features = nn.Sequential(*list(resnet.children())[:-2])
         
         # 特征金字塔网络 (FPN) 风格的上采样
