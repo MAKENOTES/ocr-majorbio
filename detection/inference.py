@@ -4,7 +4,6 @@ import numpy as np
 import os
 from PIL import Image
 import sys
-from pathlib import Path
 
 # 添加项目根目录到 sys.path，以便可以导入 models 和 utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,9 +12,9 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-IMAGE_PATH = "data/train_images/000005.jpg" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
-MODEL_PATH = "east_model_epoch_100.pth" # 模型权重路径
-OUTPUT_DIR = "test_results" # 结果保存目录
+IMAGE_PATH = "detection/data/train_images/000005.jpg" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
+MODEL_PATH = "detection/checkpoints/detection_epoch_1.pth" # 模型权重路径
+OUTPUT_DIR = "detection/test_results" # 结果保存目录
 INPUT_SIZE = 1024 # 输入图像尺寸
 SCORE_THRESHOLD = 0.8 # 分数阈值
 NMS_THRESHOLD = 0.2 # NMS 阈值

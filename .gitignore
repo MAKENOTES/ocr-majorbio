@@ -6,7 +6,8 @@ __pycache__/
 dataset/
 third/
 outputs/
-data/
+detection/data/
+detection/checkpoints/
 test_results/
 
 

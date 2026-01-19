@@ -14,8 +14,8 @@ LEARNING_RATE = 1e-4
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
 EPOCHS = 100
 INPUT_SIZE = 1024
-TRAIN_IMAGE_DIR = "data/train_images"
-TRAIN_LABEL_DIR = "data/train_labels"
+TRAIN_IMAGE_DIR = "detection/data/train_images"
+TRAIN_LABEL_DIR = "detection/data/train_labels"
 MAX_KEEP_CHECKPOINTS = 10 # 保留最近的多少个模型检查点
 # 可选: 添加验证集数据目录
 # VAL_IMAGE_DIR = "data/val_images"
@@ -116,7 +116,7 @@ def main():
         #     # ... 此处编写验证逻辑 ...
         
         # --- 保存模型检查点 ---
-        checkpoint_filename = f"east_model_epoch_{epoch+1}.pth"
+        checkpoint_filename = f"detection/checkpoints/detection_epoch_{epoch+1}.pth"
         torch.save(model.state_dict(), checkpoint_filename)
         print(f"已保存模型检查点至 {checkpoint_filename}")
         
