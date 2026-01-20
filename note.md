@@ -9,3 +9,8 @@ torchaudio==2.9.0.*
 opencv-python==4.12.0.88
 Pillow==12.0.0
 tqdm==4.67.1
+
+
+tensorboard
+tensorboard --logdir=detection/runs
+    
