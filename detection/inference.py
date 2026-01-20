@@ -12,7 +12,7 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/detection_epoch_1.pth" # 模型权重路径
+MODEL_PATH = "detection/checkpoints/detection_epoch_100.pth" # 模型权重路径
 IMAGE_PATH = "detection/data/test" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
 OUTPUT_DIR = "detection/data/test_results" # 结果保存目录
 INPUT_SIZE = 1024 # 输入图像尺寸
