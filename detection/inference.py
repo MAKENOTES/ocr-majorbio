@@ -12,11 +12,11 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-IMAGE_PATH = "detection/data/train_images/000005.jpg" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
 MODEL_PATH = "detection/checkpoints/detection_epoch_1.pth" # 模型权重路径
-OUTPUT_DIR = "detection/test_results" # 结果保存目录
+IMAGE_PATH = "detection/data/test" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
+OUTPUT_DIR = "detection/data/test_results" # 结果保存目录
 INPUT_SIZE = 1024 # 输入图像尺寸
-SCORE_THRESHOLD = 0.8 # 分数阈值
+SCORE_THRESHOLD = 0.7 # 分数阈值
 NMS_THRESHOLD = 0.2 # NMS 阈值
 
 def load_model(model_path, device):
