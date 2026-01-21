@@ -129,7 +129,7 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
         # 2. 生成收缩后的多边形用于 Score Map
         # EAST 建议收缩比例约为 0.3 (即保留 0.7 的区域? 不，是收缩边界)
         # 这里的参数 0.3 是 EAST 论文中的 shrink_ratio
-        shrunk_quad = shrink_polygon(scaled_quad, r=0.3)
+        shrunk_quad = shrink_polygon(scaled_quad, r=0.4)
         
         # 3. 绘制 Score Map (使用收缩后的框)
         mask = np.zeros((score_map_h, score_map_w), dtype=np.uint8)

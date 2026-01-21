@@ -21,6 +21,7 @@ TRAIN_LABEL_DIR = "detection/data/train_labels"
 VAL_IMAGE_DIR = "detection/data/val_images"
 VAL_LABEL_DIR = "detection/data/val_labels"
 MAX_KEEP_CHECKPOINTS = 10 # 保留最近的多少个模型检查点
+VAL_INTERVAL = 10 # 每多少个 epoch 进行一次验证
 
 def validate(model, val_loader, criterion, device):
     """
@@ -139,7 +140,8 @@ def main():
         print(f"Epoch {epoch+1} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f})")
 
         # --- 验证步骤 ---
-        if val_loader:
+        # 每 VAL_INTERVAL 个 epoch 进行一次验证
+        if val_loader and (epoch + 1) % VAL_INTERVAL == 0:
             print("正在验证...")
             val_loss, val_score, val_geo = validate(model, val_loader, criterion, device)
             print(f"Epoch {epoch+1} 验证结果: Loss: {val_loss:.4f} (Score: {val_score:.4f}, Geo: {val_geo:.4f})")
@@ -154,6 +156,9 @@ def main():
                 best_model_path = "detection/checkpoints/best_model.pth"
                 torch.save(model.state_dict(), best_model_path)
                 print(f"★ 发现新最佳模型 (Val Loss: {val_loss:.4f})，已保存至 {best_model_path}")
+        else:
+             # 如果不进行验证，只记录训练损失
+             writer.add_scalar('Loss/epoch_train', avg_loss, epoch + 1)
 
         # --- 保存常规检查点 ---
         checkpoint_dir = "detection/checkpoints/"
