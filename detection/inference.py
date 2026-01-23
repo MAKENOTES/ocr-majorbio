@@ -73,8 +73,16 @@ def detect(model, image_path, output_dir, input_size=512, score_threshold=0.8, n
     # 根据 loss.py 中的逻辑: pred_aabb = torch.sigmoid(y_pred_geo[:, 0:4, :, :]) * feature_map_size
     feature_map_h, feature_map_w = score_map.shape
     
-    # 恢复 AABB 距离
-    geo_map_aabb = torch.sigmoid(geo_map[0, :4, :, :]) * feature_map_h 
+    # 恢复 AABB 距离 (top, right, bottom, left)
+    geo_map_aabb = torch.sigmoid(geo_map[0, :4, :, :])
+    
+    # 创建缩放张量 [H, W, H, W] 并调整形状以进行广播
+    # 我们的 geo_map 通道顺序是 (top, right, bottom, left)
+    scale_factors = torch.tensor([feature_map_h, feature_map_w, feature_map_h, feature_map_w], device=geo_map_aabb.device)
+    scale_tensor = scale_factors.view(4, 1, 1) # 形状变为 [4, 1, 1]
+    
+    # 应用缩放，对垂直和水平距离使用不同的缩放因子
+    geo_map_aabb = geo_map_aabb * scale_tensor
     
     # 转换为 numpy
     score_map_np = score_map.cpu().numpy()
