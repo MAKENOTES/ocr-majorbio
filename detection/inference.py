@@ -12,9 +12,9 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/detection_epoch_100.pth" # 模型权重路径 detection_epoch_100 best_model
+MODEL_PATH = "detection/checkpoints/best_model_epoch_100_loss_0.1306.pth" # 模型权重路径 detection_epoch_100 best_model
 IMAGE_PATH = "detection/data/test" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
-OUTPUT_DIR = "detection/data/test_results/2" # 结果保存目录
+OUTPUT_DIR = "detection/data/test_results/4" # 结果保存目录
 INPUT_SIZE = 1024 # 输入图像尺寸
 SCORE_THRESHOLD = 0.7 # 分数阈值
 NMS_THRESHOLD = 0.2 # NMS 阈值
