@@ -12,11 +12,11 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_model_epoch_100_loss_0.1306.pth" # 模型权重路径 detection_epoch_100 best_model
+MODEL_PATH = "detection/checkpoints/best_detection_100_loss_0.1387.pth" # 模型权重路径 detection_epoch_100 best_model
 IMAGE_PATH = "detection/data/test" # 输入图像路径或目录 Path("../data/train_images/000201.jpg")
-OUTPUT_DIR = "detection/data/test_results/4" # 结果保存目录
+OUTPUT_DIR = "detection/data/test_results/2" # 结果保存目录
 INPUT_SIZE = 1024 # 输入图像尺寸
-SCORE_THRESHOLD = 0.7 # 分数阈值
+SCORE_THRESHOLD = 0.85 # 分数阈值
 NMS_THRESHOLD = 0.2 # NMS 阈值
 
 def load_model(model_path, device):
@@ -74,16 +74,15 @@ def detect(model, image_path, output_dir, input_size=512, score_threshold=0.8, n
     feature_map_h, feature_map_w = score_map.shape
     
     # 恢复 AABB 距离 (top, right, bottom, left)
-    geo_map_aabb = torch.sigmoid(geo_map[0, :4, :, :])
-    
-    # 创建缩放张量 [H, W, H, W] 并调整形状以进行广播
-    # 我们的 geo_map 通道顺序是 (top, right, bottom, left)
-    scale_factors = torch.tensor([feature_map_h, feature_map_w, feature_map_h, feature_map_w], device=geo_map_aabb.device)
-    scale_tensor = scale_factors.view(4, 1, 1) # 形状变为 [4, 1, 1]
-    
-    # 应用缩放，对垂直和水平距离使用不同的缩放因子
-    geo_map_aabb = geo_map_aabb * scale_tensor
-    
+    geo_map_aabb = torch.sigmoid(geo_map[0, :4, :, :]) * feature_map_h
+    # geo_map_aabb = torch.sigmoid(geo_map[0, :4, :, :])
+    # # 创建缩放张量 [H, W, H, W] 并调整形状以进行广播
+    # # 我们的 geo_map 通道顺序是 (top, right, bottom, left)
+    # scale_factors = torch.tensor([feature_map_h, feature_map_w, feature_map_h, feature_map_w], device=geo_map_aabb.device)
+    # scale_tensor = scale_factors.view(4, 1, 1) # 形状变为 [4, 1, 1]
+    # # 应用缩放，对垂直和水平距离使用不同的缩放因子
+    # geo_map_aabb = geo_map_aabb * scale_tensor
+
     # 转换为 numpy
     score_map_np = score_map.cpu().numpy()
     geo_map_np = geo_map_aabb.cpu().numpy()
