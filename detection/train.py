@@ -147,6 +147,14 @@ def main():
             loss, score_loss, geo_loss = criterion(true_score_maps, pred_score_maps, true_geo_maps, pred_geo_maps)
             
             loss.backward()
+            
+            # --- 记录梯度信息 (每 100 个 batch 记录一次，避免日志过大) ---
+            if batch_idx % 100 == 0:
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        writer.add_histogram(f'Gradients/{name}', param.grad, epoch * len(train_loader) + batch_idx)
+                        writer.add_scalar(f'Gradient_Norm/{name}', param.grad.norm(), epoch * len(train_loader) + batch_idx)
+
             optimizer.step()
             
             loss_val, score_loss_val, geo_loss_val = loss.item(), score_loss.item(), geo_loss.item()

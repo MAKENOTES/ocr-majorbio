@@ -2,111 +2,79 @@ import numpy as np
 import cv2
 import math
 
-def shrink_polygon(poly, r):
+def shrink_polygon(poly, r=0.4):
     """
-    收缩多边形。
-    参考 EAST 论文公式。
-    :param poly: 形状为 (4, 2) 的多边形坐标
-    :param r: 收缩比例
-    :return: 收缩后的多边形
+    修正后的多边形收缩函数。
+    1. 修正了顶点顺序错位的问题。
+    2. 增加了防止过度收缩的保护机制（特别是针对细长文本）。
     """
-    # 计算多边形面积
     area = cv2.contourArea(poly)
-    # 计算多边形周长
     perimeter = cv2.arcLength(poly, True)
-    
+
     if perimeter == 0:
         return poly
 
-    # 计算收缩距离 d = Area * (1 - r^2) / Perimeter
-    # 这里的 r 是保留比例，例如 0.3 表示收缩掉边界
-    # EAST 论文中 R = 0.3
+    # --- 核心修正 1: 收缩公式与限制 ---
+    # 计算理论收缩距离
     d = area * (1 - r * r) / perimeter
-    
-    # 使用 Clipper 库或者简单的几何偏移进行收缩
-    # 这里使用 shapely 或者 pyclipper 会更精确，但为了不引入新依赖，
-    # 我们使用简单的向心收缩或 cv2 的多边形偏移（如果可用）
-    # 或者使用简单的几何计算：向内移动边
-    
-    # 简单实现：使用 pco (Polygon Clipper Offset) 逻辑的简化版
-    # 计算每条边的向内法向量并移动
-    
+
+    # [保护机制]：如果文本非常细长（例如高度只有 4px），d 可能会导致两条长边交叉
+    # 我们计算多边形的“短边”长度近似值
+    # 简单的近似：面积 / (周长/2) = 平均厚度
+    # 或者直接计算最短边长
+    edge_lengths = [np.linalg.norm(poly[i] - poly[(i + 1) % 4]) for i in range(4)]
+    min_side = min(edge_lengths)
+
+    # 限制 d 不能超过最短边的一半，否则多边形会消失或翻转
+    # 留 1 个像素的余地，保证至少有 mask 存在
+    max_d = (min_side - 1.0) / 2.0
+
+    # 如果 max_d <= 0，说明框太小了，甚至不足1px，此时强行保留极小厚度或不收缩
+    if max_d < 0:
+        max_d = 0  # 不收缩，或者极小收缩
+
+    d = min(d, max_d)
+
     pco = []
-    for i in range(4):
-        p1 = poly[i]
-        p2 = poly[(i + 1) % 4]
-        
-        edge = p2 - p1
-        length = np.linalg.norm(edge)
-        if length == 0:
-            continue
-            
-        # 法向量 (旋转90度)
-        normal = np.array([-edge[1], edge[0]]) / length
-        
-        # 向内移动 d
-        offset = normal * d
-        
-        # 这里只是简单示意，真正的多边形收缩需要计算交点
-        # 为了稳健性，我们使用一个更简单的近似：
-        # 计算重心，然后向重心缩放
-    
-    # --- 简化的重心收缩法 ---
-    # 这对于凸四边形（大多数文本框）通常足够有效
-    center = np.mean(poly, axis=0)
-    # 简单的线性插值收缩可能不完全符合 d 的定义，但在工程上常用
-    # 我们尝试用 shrink_ratio 来近似
-    # 实际上 EAST 推荐的是基于距离 d 的收缩
-    
-    # 让我们尝试一种更符合 EAST 的方式：
-    # 使用 Vatti 裁剪算法的库通常最好，但这里我们手动计算偏移后的顶点
-    # 由于实现复杂，我们退回到一个鲁棒的近似：
-    # 找出每条边向内平移 d 后的直线，计算它们的交点。
-    
     lines = []
     for i in range(4):
         p1 = poly[i]
         p2 = poly[(i + 1) % 4]
-        
         edge = p2 - p1
         length = np.linalg.norm(edge)
         if length < 1e-6:
-             # 避免除零
             normal = np.array([0, 0])
         else:
-            # 假设点是顺时针或逆时针，我们需要确定向内的方向
-            # 文本框通常是凸的。
-            # 我们可以检查中心点是否在法向量的一侧
+            # 顺时针顺序，向内法向量
             normal = np.array([-edge[1], edge[0]]) / length
-            mid_point = (p1 + p2) / 2
-            if np.dot(normal, center - mid_point) < 0:
-                normal = -normal
-        
-        # 直线方程: point + t * direction
-        # 偏移后的直线经过点: p1 + d * normal
+
+        # 偏移后的直线点和方向
         start_pt = p1 + d * normal
-        lines.append((start_pt, edge / (length + 1e-6))) # (点, 方向向量)
+        lines.append((start_pt, edge))  # 存方向向量即可，不需要归一化
 
     new_poly = []
     for i in range(4):
-        p1, v1 = lines[i]
-        p2, v2 = lines[(i + 1) % 4]
-        
-        # 求两直线交点
-        # L1: P1 + t * V1
-        # L2: P2 + u * V2
-        # Cross product approach
-        det = v1[0] * v2[1] - v1[1] * v2[0]
+        # --- 核心修正 2: 顶点对齐逻辑 ---
+        # 我们想要计算对应原 poly[i] 的新顶点
+        # 原 poly[i] 是 Line[i-1] (前一条边) 和 Line[i] (当前边) 的交点
+
+        # Line 1: 上一条边 (i-1)
+        p1_prev, v1_prev = lines[(i - 1) % 4]
+        # Line 2: 当前边 (i)
+        p1_curr, v1_curr = lines[i]
+
+        # 计算交点
+        det = v1_prev[0] * v1_curr[1] - v1_prev[1] * v1_curr[0]
+
         if abs(det) < 1e-6:
-            # 平行线，直接取中点或其他
-            new_poly.append(poly[i]) 
+            new_poly.append(poly[i])
             continue
-            
-        diff = p2 - p1
-        t = (diff[0] * v2[1] - diff[1] * v2[0]) / det
-        intersection = p1 + t * v1
+
+        diff = p1_curr - p1_prev
+        t = (diff[0] * v1_curr[1] - diff[1] * v1_curr[0]) / det
+        intersection = p1_prev + t * v1_prev
         new_poly.append(intersection)
-        
+
     return np.array(new_poly, dtype=np.float32)
 
 def generate_ground_truth(image_size, quads, score_map_scale=0.25):
