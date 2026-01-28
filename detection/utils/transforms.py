@@ -4,6 +4,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import functional as F
 from .ground_truth import generate_ground_truth
+from torchvision.transforms import Normalize
 
 class ResizeAndPad:
     """
@@ -39,7 +40,7 @@ class ResizeAndPad:
         resized_w, resized_h = int(w * scale), int(h * scale)
         
         # 缩放图像
-        resized_image = image.resize((resized_w, resized_h), Image.BILINEAR)
+        resized_image = image.resize((resized_w, resized_h), Image.Resampling.BICUBIC)
         
         # 创建一个带灰色背景的新图像用于填充
         new_image = Image.new('RGB', (new_w, new_h), (128, 128, 128))
@@ -90,10 +91,11 @@ class GenerateGT:
         return sample
 
 class ToTensor:
-    """
-    一个自定义的transform，将样本中的PIL图像和numpy数组转换为PyTorch张量。
-    同时，它只选择训练所必需的键，以避免在DataLoader中因尺寸不一导致的出错。
-    """
+    def __init__(self):
+        # ImageNet 的标准均值和方差
+        self.normalize = Normalize(mean=[0.485, 0.456, 0.406],
+                                   std=[0.229, 0.224, 0.225])
+
     def __call__(self, sample):
         """
         对输入的样本进行变换。
@@ -102,6 +104,7 @@ class ToTensor:
         """
         # 将 image, score_map, 和 geo_map 转换为张量
         image = F.to_tensor(sample['image'])
+        image = self.normalize(image)
         score_map = torch.from_numpy(sample['score_map']).float()
         geo_map = torch.from_numpy(sample['geo_map']).float()
 

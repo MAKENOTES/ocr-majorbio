@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import math
 
 def shrink_polygon(poly, r=0.4):
     """
@@ -77,61 +76,54 @@ def shrink_polygon(poly, r=0.4):
 
     return np.array(new_poly, dtype=np.float32)
 
+
 def generate_ground_truth(image_size, quads, score_map_scale=0.25):
-    """
-    为EAST模型生成真值（ground truth）分数图和几何图。
-    """
     img_h, img_w = image_size
     score_map_h, score_map_w = int(img_h * score_map_scale), int(img_w * score_map_scale)
-    
+
     score_map = np.zeros((score_map_h, score_map_w), dtype=np.float32)
-    geo_map = np.zeros((5, score_map_h, score_map_w), dtype=np.float32)
-    
+    geo_map = np.zeros((4, score_map_h, score_map_w), dtype=np.float32)
+
     if quads.size == 0:
         return score_map, geo_map
 
     for quad in quads:
-        # 1. 坐标缩放
         scaled_quad = quad * score_map_scale
-        
-        # 2. 生成收缩后的多边形用于 Score Map
-        # EAST 建议收缩比例约为 0.3 (即保留 0.7 的区域? 不，是收缩边界)
-        # 这里的参数 0.3 是 EAST 论文中的 shrink_ratio
-        shrunk_quad = shrink_polygon(scaled_quad, r=0.4)
-        
-        # 3. 绘制 Score Map (使用收缩后的框)
+
+        shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
+
         mask = np.zeros((score_map_h, score_map_w), dtype=np.uint8)
         cv2.fillPoly(mask, [shrunk_quad.astype(np.int32)], 1)
         score_map[mask == 1] = 1
-        
-        # 4. 计算 Geo Map
-        # 注意：Geo Map 的距离是基于“未收缩”的原始框计算的，
-        # 但是只在“收缩后”的 Score Map 区域内进行赋值。
-        # 这样模型学会了：在文本中心区域预测出完整的文本框大小。
-        
-        # 计算原始框的 AABB (或者使用更复杂的点到边距离)
+
         x_min, y_min = np.min(scaled_quad, axis=0)
         x_max, y_max = np.max(scaled_quad, axis=0)
-        
-        # 获取收缩后区域内的像素
+
         positive_pixels = np.argwhere(mask == 1)
-        
+
         for y, x in positive_pixels:
-            # 计算像素点到原始(未收缩)边界框四边的距离
-            dist_top = y - y_min
-            dist_right = x_max - x
-            dist_bottom = y_max - y
-            dist_left = x - x_min
-            
-            # 只有当像素在原始框内时距离才有效 (理论上收缩后的肯定在原始内)
-            # 加上一个小的 epsilon 防止除零或负数
-            
-            # 更新几何图
-            if geo_map[0, y, x] == 0 or (dist_top * dist_bottom < geo_map[0, y, x] * geo_map[2, y, x]):
+            # 使用像素中心对齐 (更精准)
+            pixel_center_x = x + 0.5
+            pixel_center_y = y + 0.5
+
+            dist_top = pixel_center_y - y_min
+            dist_right = x_max - pixel_center_x
+            dist_bottom = y_max - pixel_center_y
+            dist_left = pixel_center_x - x_min
+
+            # 限制为非负
+            dist_top = max(0, dist_top)
+            dist_right = max(0, dist_right)
+            dist_bottom = max(0, dist_bottom)
+            dist_left = max(0, dist_left)
+
+            # 简单的 AABB 赋值逻辑 (因为没有旋转，不需要选最小面积的)
+            # 对于纯水平框，重叠区域通常选择"距离边缘最近"或者"保持最大"
+            # 简单起见，覆盖即可，或者取最大值（防止小框覆盖大框）
+            if geo_map[0, y, x] == 0:
                 geo_map[0, y, x] = dist_top
                 geo_map[1, y, x] = dist_right
                 geo_map[2, y, x] = dist_bottom
                 geo_map[3, y, x] = dist_left
-                geo_map[4, y, x] = 0 # 角度暂设为0
-                
+
     return score_map, geo_map

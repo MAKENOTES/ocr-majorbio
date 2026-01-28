@@ -12,9 +12,9 @@ from models.east_model import EASTModel
 from utils.loss import EASTLoss
 
 # --- 超参数 ---
-LEARNING_RATE = 1e-4
+LEARNING_RATE =  1e-5  #1e-4 3e-5
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
-EPOCHS = 100
+EPOCHS = 700
 INPUT_SIZE = 1024
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"
@@ -155,6 +155,8 @@ def main():
                         writer.add_histogram(f'Gradients/{name}', param.grad, epoch * len(train_loader) + batch_idx)
                         writer.add_scalar(f'Gradient_Norm/{name}', param.grad.norm(), epoch * len(train_loader) + batch_idx)
 
+            #梯度裁剪
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             
             loss_val, score_loss_val, geo_loss_val = loss.item(), score_loss.item(), geo_loss.item()

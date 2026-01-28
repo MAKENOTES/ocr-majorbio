@@ -38,16 +38,14 @@ class EASTLoss(nn.Module):
     1. 分数图损失 (score_loss): 使用 Dice Loss 计算，用于区分文本和背景。
     2. 几何图损失 (geo_loss): 使用一个简化的 IoU 损失（基于L1距离）计算，用于回归边界框的位置。
     """
-    def __init__(self, lambda_iou=1.0, lambda_angle=10.0):
+    def __init__(self, lambda_iou=3.0):
         """
         初始化 EAST 损失函数。
         :param lambda_iou: float, IoU 损失的权重。
-        :param lambda_angle: float, 角度损失的权重 (在此简化版本中未使用)。
         """
         super(EASTLoss, self).__init__()
         self.dice_loss = DiceLoss()
         self.lambda_iou = lambda_iou
-        self.lambda_angle = lambda_angle # 在这个简化版本中未使用
 
     def forward(self, y_true_score, y_pred_score, y_true_geo, y_pred_geo):
         """
@@ -63,24 +61,12 @@ class EASTLoss(nn.Module):
         
         # 创建一个掩码，只在正样本区域计算几何损失
         mask = (y_true_score > 0).float()
-        
-        # 几何图 (AABB): 4个通道表示距离 (上, 右, 下, 左)
-        # true_aabb 是在特征图尺度 (128x128) 上计算的像素距离。
-        # pred_aabb 经过 sigmoid 4个方向距取值范围离是 0~1。（重点）
-        # 所以应该乘以 128 (即 512 * 0.25) 来匹配 true_aabb 的尺度。
-        # 如果模型输出Sigmoid后是0.5，乘以128后就是64.0
-        # 如果模型输出Sigmoid后是0.234，乘以128后就是30.0
-        
-        # 动态获取特征图的尺寸作为缩放因子
-        # y_true_score 的形状是 [Batch, 1, H, W]
-        feature_map_size = y_true_score.shape[2]
-        pred_aabb = torch.sigmoid(y_pred_geo[:, 0:4, :, :]) * feature_map_size
 
-        # 来源 utils/ground_truth.py ，4个方向距离取值范围是0-128
-        true_aabb = y_true_geo[:, 0:4, :, :]
-        
-        # 使用真正的 IoU Loss (iou_loss_real)
-        geo_loss = self.iou_loss_real(pred_aabb, true_aabb, mask)
+        # y_pred_geo 已经是 ReLU 后的绝对像素距离 (N, 4, H, W)
+        # y_true_geo 也是绝对像素真值 (N, 4, H, W)
+        # 直接算，不需要 sigmoid * scale
+
+        geo_loss = self.iou_loss_real(y_pred_geo, y_true_geo, mask)
         
         # 总损失
         total_loss = score_loss + self.lambda_iou * geo_loss
@@ -110,67 +96,46 @@ class EASTLoss(nn.Module):
         return torch.sum(masked_l1) / num_positive_pixels
 
     def iou_loss_real(self, pred_aabb, true_aabb, mask):
-        """
-        真正的 IoU Loss (Intersection over Union)。
-        公式: -log(IoU)
-        :param pred_aabb: 预测的AABB几何图, shape (N, 4, H, W)
-        :param true_aabb: 真值的AABB几何图, shape (N, 4, H, W)
-        :param mask: 只在文本区域计算损失的掩码, shape (N, 1, H, W)
-        :return: float, 计算出的 IoU 损失。
-        """
-        eps = 1e-5
-        
-        # 拆分通道: top, right, bottom, left
-        # pred_aabb shape: (N, 4, H, W)
+        # --- 这里的逻辑必须加固，防止 ReLU 导致的 0 值爆炸 ---
+        eps = 1e-6  # 稍微大一点的 epsilon
+
+        # 现在的输入形状直接就是 (N, 4, H, W)
         d_top_pred = pred_aabb[:, 0]
         d_right_pred = pred_aabb[:, 1]
         d_bottom_pred = pred_aabb[:, 2]
         d_left_pred = pred_aabb[:, 3]
-        
+
         d_top_true = true_aabb[:, 0]
         d_right_true = true_aabb[:, 1]
         d_bottom_true = true_aabb[:, 2]
         d_left_true = true_aabb[:, 3]
-        
-        # 计算交集区域的宽和高
-        # 交集宽度 = min(pred_left, true_left) + min(pred_right, true_right)
+
+        # 计算交集 (Intersection)
         inter_w = torch.min(d_left_pred, d_left_true) + torch.min(d_right_pred, d_right_true)
-        # 交集高度 = min(pred_top, true_top) + min(pred_bottom, true_bottom)
         inter_h = torch.min(d_top_pred, d_top_true) + torch.min(d_bottom_pred, d_bottom_true)
-        
         inter_area = inter_w * inter_h
-        
-        # 计算并集区域
+
+        # 计算并集 (Union)
         area_pred = (d_left_pred + d_right_pred) * (d_top_pred + d_bottom_pred)
         area_true = (d_left_true + d_right_true) * (d_top_true + d_bottom_true)
-        
         union_area = area_pred + area_true - inter_area
-        
-        # 增加数值稳定性保护: 防止 union_area <= 0
+
+        # [安全锁] 防止分母为 0
         union_area = torch.clamp(union_area, min=eps)
-        
+
         # 计算 IoU
         iou = (inter_area + eps) / union_area
-        
-        # 限制 IoU 范围，防止 log(0) 或 log(负数)
+
+        # [安全锁] 防止 log(0)
         iou = torch.clamp(iou, min=eps, max=1.0)
-        
-        # 计算 Loss: -log(IoU)
+
         iou_loss = -torch.log(iou)
-        
-        # 调整 mask 形状以匹配 iou_loss (N, H, W)
+
+        # 只计算 mask 区域
         if mask.dim() == 4:
             mask = mask.squeeze(1)
-            
-        # 展平
-        iou_loss = iou_loss.view(-1)
-        mask = mask.view(-1)
-        
-        # 只选择正样本
-        pos_indices = mask > 0.5
-        pos_loss = iou_loss[pos_indices]
-        
-        if pos_loss.numel() == 0:
-            return torch.tensor(0.0, device=pred_aabb.device)
-            
-        return pos_loss.mean()
+
+        iou_loss = iou_loss * mask
+        num_pos = torch.sum(mask) + eps  # 防止无正样本时除零
+
+        return torch.sum(iou_loss) / num_pos

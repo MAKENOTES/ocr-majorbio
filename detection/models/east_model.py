@@ -32,8 +32,7 @@ class EASTModel(nn.Module):
         # 分数图 (Score map): 1个通道，代表像素点是文本的概率
         self.score_conv = nn.Conv2d(256, 1, kernel_size=1)
         # 几何图 (Geometry map): 4个通道，代表像素点到上、右、下、左边界的距离 (RBOX)
-        # 另外1个通道是旋转角度
-        self.geo_conv = nn.Conv2d(256, 5, kernel_size=1)
+        self.geo_conv = nn.Conv2d(256, 4, kernel_size=1)
 
     def forward(self, x):
         """
@@ -58,11 +57,11 @@ class EASTModel(nn.Module):
         score = torch.sigmoid(score) # 归一化到 [0, 1] 区间
         
         geo = self.geo_conv(y)
-        # 几何图可以有多种解释方式
-        # 对于 RBOX: 4个通道是距离 (上, 右, 下, 左)，1个通道是角度
-        # 距离值需要根据输入图像尺寸进行归一化
-        # 示例: distances = torch.sigmoid(geo[:, 0:4, :, :]) * 512
-        #       angle = (torch.sigmoid(geo[:, 4, :, :]) - 0.5) * math.pi
+        # 既然是纯水平，geo 的 4 个通道全是距离。
+        # 直接用 ReLU 保证非负，且无上限（解决长文本截断问题）。
+        # 不需要 sigmoid，不需要 * 512
+        geo = torch.relu(geo)
+
         
         return score, geo
 
