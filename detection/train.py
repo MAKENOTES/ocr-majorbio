@@ -14,14 +14,19 @@ from utils.loss import EASTLoss
 # --- 超参数 ---
 LEARNING_RATE =  1e-5  #1e-4 3e-5
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
-EPOCHS = 700
+EPOCHS = 500
 INPUT_SIZE = 1024
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"
 VAL_IMAGE_DIR = "detection/data/val_images"
 VAL_LABEL_DIR = "detection/data/val_labels"
-MAX_KEEP_CHECKPOINTS = 10 # 保留最近的多少个模型检查点
-VAL_INTERVAL = 10 # 每多少个 epoch 进行一次验证
+
+# --- 模型保存策略优化 ---
+MAX_KEEP_CHECKPOINTS = 10       # 常规检查点：保留最近的 5 个 (用于断点续训)
+BEST_MODELS_TO_KEEP = 3        # 最佳检查点：保留验证集 Loss 最低的 Top 3
+VAL_INTERVAL = 10              # 前期：每 10 个 epoch 验证一次
+START_DENSE_VAL_EPOCH = 500    # 策略切换点：从第 500 epoch 开始
+                               # 500 以后，每个 epoch 都验证 (忽略 VAL_INTERVAL)
 
 def validate(model, val_loader, criterion, device, writer, epoch):
     """
@@ -85,12 +90,40 @@ def validate(model, val_loader, criterion, device, writer, epoch):
 
     return avg_loss, avg_score_loss, avg_geo_loss
 
+
+def save_best_checkpoint(model, epoch, val_loss, best_checkpoints_list):
+    """
+    管理 Top-K 最佳模型的保存与删除
+    best_checkpoints_list: [(loss, path), ...]
+    """
+    checkpoint_dir = "detection/checkpoints/"
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+
+    # 保存当前模型
+    file_name = f"best_detection_epoch_{epoch}_loss_{val_loss:.5f}.pth"
+    save_path = os.path.join(checkpoint_dir, file_name)
+    torch.save(model.state_dict(), save_path)
+
+    # 加入列表并排序 (按 loss 从小到大)
+    best_checkpoints_list.append((val_loss, save_path))
+    best_checkpoints_list.sort(key=lambda x: x[0])
+
+    # 如果超过数量限制，删除 loss 最大的那个 (列表最后一个)
+    if len(best_checkpoints_list) > BEST_MODELS_TO_KEEP:
+        worst_model = best_checkpoints_list.pop()  # 弹出最后一个 (loss 最大的)
+        worst_path = worst_model[1]
+        if os.path.exists(worst_path):
+            os.remove(worst_path)
+            print(f"移除旧的 Top-{BEST_MODELS_TO_KEEP + 1} 模型: {os.path.basename(worst_path)}")
+
+    print(f"★ 当前 Top-{BEST_MODELS_TO_KEEP} 模型已更新 (本轮 Loss: {val_loss:.5f})")
+
 def main():
     """
     主训练函数。
     """
     # --- TensorBoard 设置 ---
-    # 2. 初始化 SummaryWriter，日志会保存在 detection/runs/ 目录下
     log_dir = f"detection/runs/ocr_experiment_{int(time.time())}"
     writer = SummaryWriter(log_dir)
     print(f"TensorBoard 日志将保存在: {log_dir}")
@@ -115,27 +148,26 @@ def main():
 
     # --- 模型、损失函数和优化器 ---
     model = EASTModel(pretrained=True).to(device)
+    # model.load_state_dict(torch.load("detection/checkpoints/detection_epoch_1200.pth"))
     criterion = EASTLoss().to(device)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
-    # 5. 将模型图写入 TensorBoard (仅一次)
+    # 将模型图写入 TensorBoard (仅一次)
     if train_loader:
         first_batch = next(iter(train_loader))
         writer.add_graph(model, first_batch['image'].to(device))
 
-    saved_checkpoints = []
-    best_val_loss = float('inf')
-    best_model_path = None # 记录当前最佳模型的路径
 
+    regular_checkpoints = []  # 用于保存最近 N 个 epoch (用于 resume)
+    best_checkpoints = []  # 用于保存 Top K best models (用于 inference)
     # --- 训练循环 ---
-    for epoch in range(EPOCHS):
+    for epoch in range(1, EPOCHS + 1): # 从 1 开始计数比较直观
         model.train()
         epoch_loss = 0
         epoch_score_loss = 0
         epoch_geo_loss = 0
         
-        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
-        
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS}")
         for batch_idx, batch in enumerate(progress_bar):
             images = batch['image'].to(device)
             true_score_maps = batch['score_map'].to(device).unsqueeze(1)
@@ -143,9 +175,7 @@ def main():
 
             optimizer.zero_grad()
             pred_score_maps, pred_geo_maps = model(images)
-            
             loss, score_loss, geo_loss = criterion(true_score_maps, pred_score_maps, true_geo_maps, pred_geo_maps)
-            
             loss.backward()
             
             # --- 记录梯度信息 (每 100 个 batch 记录一次，避免日志过大) ---
@@ -160,8 +190,7 @@ def main():
             optimizer.step()
             
             loss_val, score_loss_val, geo_loss_val = loss.item(), score_loss.item(), geo_loss.item()
-            
-            # 3. 记录每个 batch 的训练损失到 TensorBoard
+            # 记录每个 batch 的训练损失到 TensorBoard
             global_step = epoch * len(train_loader) + batch_idx
             writer.add_scalar('batch/loss', loss_val, global_step)
             writer.add_scalar('batch/score_loss', score_loss_val, global_step)
@@ -177,56 +206,43 @@ def main():
         avg_loss = epoch_loss / len(train_loader)
         avg_score_loss = epoch_score_loss / len(train_loader)
         avg_geo_loss = epoch_geo_loss / len(train_loader)
-        
-        print(f"Epoch {epoch+1} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f})")
+        print(f"Epoch {epoch} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f})")
         
         # 记录学习率
         current_lr = optimizer.param_groups[0]['lr']
-        writer.add_scalar('Learning Rate', current_lr, epoch + 1)
+        writer.add_scalar('Learning Rate', current_lr, epoch)
 
         # --- 验证步骤 ---
-        # 每 VAL_INTERVAL 个 epoch 进行一次验证
-        if val_loader and (epoch + 1) % VAL_INTERVAL == 0:
-            print("正在验证...")
-            # 传递 writer 和 epoch 以便记录可视化图像
-            val_loss, val_score, val_geo = validate(model, val_loader, criterion, device, writer, epoch + 1)
-            print(f"Epoch {epoch+1} 验证结果: Loss: {val_loss:.4f} (Score: {val_score:.4f}, Geo: {val_geo:.4f})")
-            
-            # 4. 记录训练和验证的 Epoch 平均损失
-            writer.add_scalars('epoch/loss', {'train': avg_loss, 'validation': val_loss}, epoch + 1)
-            writer.add_scalars('epoch/score Loss', {'train': avg_score_loss, 'validation': val_score}, epoch + 1)
-            writer.add_scalars('epoch/geo Loss', {'train': avg_geo_loss, 'validation': val_geo}, epoch + 1)
-            
-            if val_loss < best_val_loss:
-                # 删除旧的最佳模型
-                if best_model_path and os.path.exists(best_model_path):
-                    os.remove(best_model_path)
-                    print(f"已删除旧的最佳模型: {best_model_path}")
-
-                best_val_loss = val_loss
-                # 新的文件名包含 epoch 和 loss
-                best_model_path = f"detection/checkpoints/best_detection_{epoch+1}_loss_{val_loss:.4f}.pth"
-                torch.save(model.state_dict(), best_model_path)
-                print(f"★ 发现新最佳模型 (Val Loss: {val_loss:.4f})，已保存至 {best_model_path}")
+        should_validate = False
+        if epoch >= START_DENSE_VAL_EPOCH:
+            should_validate = True
+        elif epoch % VAL_INTERVAL == 0:
+            should_validate = True
+        if val_loader and should_validate:
+            val_loss, val_score, val_geo = validate(model, val_loader, criterion, device, writer, epoch)
+            print(f"Epoch {epoch} Val Loss: {val_loss:.4f} (Score: {val_score:.4f}, Geo: {val_geo:.4f})")
+            writer.add_scalars('epoch/loss', {'train': avg_loss, 'validation': val_loss}, epoch)
+            writer.add_scalars('epoch/score Loss', {'train': avg_score_loss, 'validation': val_score}, epoch)
+            writer.add_scalars('epoch/geo Loss', {'train': avg_geo_loss, 'validation': val_geo}, epoch)
+            # 只有当列表未满，或者当前 loss 小于列表中最差的 loss 时，才保存
+            if len(best_checkpoints) < BEST_MODELS_TO_KEEP or val_loss < best_checkpoints[-1][0]:
+                save_best_checkpoint(model, epoch, val_loss, best_checkpoints)
         else:
-             # 如果不进行验证，只记录训练损失
-             writer.add_scalar('Loss/epoch_train', avg_loss, epoch + 1)
+            # 如果没验证，只记录训练 loss
+            writer.add_scalars('epoch/loss_train', {'train': avg_loss}, epoch)
 
-        # --- 保存常规检查点 ---
+        # --- 常规检查点保存
         checkpoint_dir = "detection/checkpoints/"
-        if not os.path.exists(checkpoint_dir):
-             os.makedirs(checkpoint_dir)
-             
-        checkpoint_filename = os.path.join(checkpoint_dir, f"detection_epoch_{epoch+1}.pth")
+        if not os.path.exists(checkpoint_dir): os.makedirs(checkpoint_dir)
+        checkpoint_filename = os.path.join(checkpoint_dir, f"detection_epoch_{epoch}.pth")
         torch.save(model.state_dict(), checkpoint_filename)
-        
-        saved_checkpoints.append(checkpoint_filename)
-        if len(saved_checkpoints) > MAX_KEEP_CHECKPOINTS:
-            oldest_checkpoint = saved_checkpoints.pop(0)
-            if os.path.exists(oldest_checkpoint):
-                os.remove(oldest_checkpoint)
+        regular_checkpoints.append(checkpoint_filename)
+        if len(regular_checkpoints) > MAX_KEEP_CHECKPOINTS:
+            oldest = regular_checkpoints.pop(0)
+            if os.path.exists(oldest):
+                os.remove(oldest)
 
-    writer.close() # 6. 关闭 writer
+    writer.close()
     print("训练完成!")
 
 if __name__ == '__main__':
