@@ -25,8 +25,7 @@ VAL_LABEL_DIR = "detection/data/val_labels"
 MAX_KEEP_CHECKPOINTS = 10       # 常规检查点：保留最近的 5 个 (用于断点续训)
 BEST_MODELS_TO_KEEP = 3        # 最佳检查点：保留验证集 Loss 最低的 Top 3
 VAL_INTERVAL = 10              # 前期：每 10 个 epoch 验证一次
-START_DENSE_VAL_EPOCH = 500    # 策略切换点：从第 500 epoch 开始
-                               # 500 以后，每个 epoch 都验证 (忽略 VAL_INTERVAL)
+START_DENSE_VAL_EPOCH = 500    # 策略切换点：从第 500 epoch 开始  每个 epoch 都验证 (忽略 VAL_INTERVAL)
 
 def validate(model, val_loader, criterion, device, writer, epoch):
     """
@@ -36,52 +35,52 @@ def validate(model, val_loader, criterion, device, writer, epoch):
     val_loss = 0
     val_score_loss = 0
     val_geo_loss = 0
-    
+
     # 用于可视化的样本 (只取第一个 batch)
     vis_images = None
     vis_true_score = None
     vis_pred_score = None
     vis_pred_geo = None
-    
+
     with torch.no_grad(): # 不计算梯度
         for batch_idx, batch in enumerate(val_loader):
             images = batch['image'].to(device)
             true_score_maps = batch['score_map'].to(device).unsqueeze(1)
             true_geo_maps = batch['geo_map'].to(device)
-            
+
             pred_score_maps, pred_geo_maps = model(images)
-            
+
             loss, score_loss, geo_loss = criterion(
                 true_score_maps, pred_score_maps,
                 true_geo_maps, pred_geo_maps
             )
-            
+
             val_loss += loss.item()
             val_score_loss += score_loss.item()
             val_geo_loss += geo_loss.item()
-            
+
             # 抓取第一个 batch 用于可视化
             if batch_idx == 0:
                 vis_images = images
                 vis_true_score = true_score_maps
                 vis_pred_score = pred_score_maps
                 # 取 Geo Map 的第一个通道 (dist_top) 进行可视化，归一化以便显示
-                vis_pred_geo = pred_geo_maps[:, 0:1, :, :] 
-                
+                vis_pred_geo = pred_geo_maps[:, 0:1, :, :]
+
     avg_loss = val_loss / len(val_loader)
     avg_score_loss = val_score_loss / len(val_loader)
     avg_geo_loss = val_geo_loss / len(val_loader)
-    
+
     # --- TensorBoard 可视化 ---
     if writer and vis_images is not None:
         # 1. 原始图像
         writer.add_images('Vis/Input_Images', vis_images, epoch)
-        
+
         # 2. Score Maps (True vs Pred)
         # 将 Score Map 扩展为 3 通道以便显示 (灰度图)
         writer.add_images('Vis/True_Score_Map', vis_true_score.repeat(1, 3, 1, 1), epoch)
         writer.add_images('Vis/Pred_Score_Map', vis_pred_score.repeat(1, 3, 1, 1), epoch)
-        
+
         # 3. Geo Map (Pred - Top Distance)
         # 简单的归一化用于显示: div by max
         if vis_pred_geo.max() > 0:
@@ -136,7 +135,7 @@ def main():
     train_transform = get_transforms(is_train=True, input_size=INPUT_SIZE)
     train_dataset = OCRDataset(image_dir=TRAIN_IMAGE_DIR, label_dir=TRAIN_LABEL_DIR, transform=train_transform)
     train_loader = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
-    
+
     val_loader = None
     if os.path.exists(VAL_IMAGE_DIR) and os.path.exists(VAL_LABEL_DIR):
         print("发现验证集，正在加载...")
@@ -151,7 +150,7 @@ def main():
     # model.load_state_dict(torch.load("detection/checkpoints/detection_epoch_1200.pth"))
     criterion = EASTLoss().to(device)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    
+
     # 将模型图写入 TensorBoard (仅一次)
     if train_loader:
         first_batch = next(iter(train_loader))
@@ -166,7 +165,7 @@ def main():
         epoch_loss = 0
         epoch_score_loss = 0
         epoch_geo_loss = 0
-        
+
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS}")
         for batch_idx, batch in enumerate(progress_bar):
             images = batch['image'].to(device)
@@ -177,7 +176,7 @@ def main():
             pred_score_maps, pred_geo_maps = model(images)
             loss, score_loss, geo_loss = criterion(true_score_maps, pred_score_maps, true_geo_maps, pred_geo_maps)
             loss.backward()
-            
+
             # --- 记录梯度信息 (每 100 个 batch 记录一次，避免日志过大) ---
             if batch_idx % 100 == 0:
                 for name, param in model.named_parameters():
@@ -188,7 +187,7 @@ def main():
             #梯度裁剪
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
-            
+
             loss_val, score_loss_val, geo_loss_val = loss.item(), score_loss.item(), geo_loss.item()
             # 记录每个 batch 的训练损失到 TensorBoard
             global_step = epoch * len(train_loader) + batch_idx
@@ -199,15 +198,15 @@ def main():
             epoch_loss += loss_val
             epoch_score_loss += score_loss_val
             epoch_geo_loss += geo_loss_val
-            
+
             progress_bar.set_postfix({'loss': f"{loss_val:.4f}", 'score': f"{score_loss_val:.4f}", 'geo': f"{geo_loss_val:.4f}"})
-            
+
         # --- Epoch 结束统计 ---
         avg_loss = epoch_loss / len(train_loader)
         avg_score_loss = epoch_score_loss / len(train_loader)
         avg_geo_loss = epoch_geo_loss / len(train_loader)
         print(f"Epoch {epoch} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f})")
-        
+
         # 记录学习率
         current_lr = optimizer.param_groups[0]['lr']
         writer.add_scalar('Learning Rate', current_lr, epoch)
