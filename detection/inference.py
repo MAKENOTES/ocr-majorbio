@@ -13,40 +13,39 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-# 确保这里的路径是你最新训练出来的模型 (ReLU版本的权重)
 MODEL_PATH = "detection/checkpoints/best_detection_epoch_981_loss_0.06583.pth"
-IMAGE_PATH = "detection/data/test"
-OUTPUT_DIR = "detection/data/test_results/4"
+IMAGE_PATH = "detection/data/train_images"
+OUTPUT_DIR = "detection/data/test_results/5"
 
-# [新增] 裁剪保存开关及路径
-SAVE_CROPS = True  # 是否保存裁剪后的文本小图
-CROP_DIR_NAME = "detection/data/crops"  # 裁剪图片存放的子目录名称（建议分开存放，以免和原图混淆）
+# 1. 裁剪保存开关
+SAVE_CROPS = True
+CROP_DIR_NAME = "detection/data/crops/20260130"
 
-INPUT_SIZE = 1024  # 保持与训练一致
-SCORE_THRESHOLD = 0.8  # 置信度阈值
-NMS_THRESHOLD = 0.2  # NMS 阈值
+# 2. [新增] 边框扩大开关 (Padding)
+EXPAND_BOX = True  # 是否开启扩大
+EXPAND_RATIO_W = 0.05  # 宽度扩大比例 (例如 0.05 = 左右各增加宽度的 5%)
+EXPAND_RATIO_H = 0.10  # 高度扩大比例 (例如 0.10 = 上下各增加高度的 10%)
+
+INPUT_SIZE = 1024
+SCORE_THRESHOLD = 0.8
+NMS_THRESHOLD = 0.2
 
 
 def load_model(model_path, device):
-    """
-    加载模型。
-    """
+    """加载模型"""
     model = EASTModel(pretrained=False)
     try:
         model.load_state_dict(torch.load(model_path, map_location=device))
     except RuntimeError as e:
         print("权重加载失败，请检查模型结构是否与权重文件匹配。")
         raise e
-
     model.to(device)
     model.eval()
     return model
 
 
 def preprocess_image(image_path, input_size):
-    """
-    预处理：ResizeAndPad
-    """
+    """预处理"""
     try:
         image = Image.open(image_path).convert('RGB')
     except Exception as e:
@@ -67,13 +66,14 @@ def preprocess_image(image_path, input_size):
     return img_tensor, resized_image, (original_w, original_h)
 
 
-def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, nms_threshold=0.2, save_crops=False):
+def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, nms_threshold=0.2,
+           save_crops=False, expand_box=False, ratio_w=0.0, ratio_h=0.0):
     """
-    执行纯水平文本检测，并支持裁剪
+    执行检测，支持从原图裁剪高清图片
     """
     device = next(model.parameters()).device
 
-    # 1. 预处理
+    # 1. 预处理 (获取 resized_image 用于推理, orig_wh 用于坐标还原)
     img_tensor, resized_image, (orig_w, orig_h) = preprocess_image(image_path, input_size)
     if img_tensor is None:
         return
@@ -104,7 +104,6 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
 
     for y, x in xy_text:
         score = score_map_np[y, x]
-
         dist_top = geo_map_np[0, y, x]
         dist_right = geo_map_np[1, y, x]
         dist_bottom = geo_map_np[2, y, x]
@@ -145,58 +144,106 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
         indices = indices.flatten()
         final_boxes = boxes[indices]
 
-    # 转换图像格式用于 OpenCV 处理
-    img_cv = cv2.cvtColor(np.array(resized_image), cv2.COLOR_RGB2BGR)
+    # 准备图像：
+    # 1. img_vis: 用于画绿框和显示结果 (resize 后的 1024 版，画图方便)
+    img_vis = cv2.cvtColor(np.array(resized_image), cv2.COLOR_RGB2BGR)
 
-    # 获取原始文件名（不含扩展名），用于命名
+    # 2. [关键] img_original: 读取原图，用于高清裁剪
+    # 注意：cv2.imread 读取的是 BGR，如果后面要用 PIL 处理可能需要转 RGB，但这里直接保存 jpg 无所谓
+    img_original = cv2.imread(image_path)
+    if img_original is None:
+        print(f"原图读取失败: {image_path}")
+        return
+
+    # 获取原图尺寸
+    real_h, real_w = img_original.shape[:2]
+
     filename_full = os.path.basename(image_path)
     filename_no_ext = os.path.splitext(filename_full)[0]
 
-    # --- [新增功能] 裁剪并保存文本区域 ---
-    if save_crops and len(final_boxes) > 0:
-        if not os.path.exists(CROP_DIR_NAME):
-            os.makedirs(CROP_DIR_NAME)
+    # --- 计算 ResizeAndPad 的缩放比例和偏移量，用于坐标映射 ---
+    # 假设 ResizeAndPad 的逻辑是：保持长宽比，长边缩放到 input_size，短边居中补零
+    scale = input_size / max(orig_h, orig_w)
 
-        # 按照从上到下、从左到右排序框，这样编号更符合阅读习惯
-        # 这里简单按 y_min 排序
+    # 计算 resize 后的实际内容宽高
+    current_content_w = int(orig_w * scale)
+    current_content_h = int(orig_h * scale)
+
+    # 计算 Padding 的偏移量 (假设是居中 padding)
+    pad_x = (input_size - current_content_w) // 2
+    pad_y = (input_size - current_content_h) // 2
+
+    # --- 处理所有框 ---
+    if len(final_boxes) > 0:
         sorted_indices = np.argsort(final_boxes[:, 1])
         sorted_boxes = final_boxes[sorted_indices]
 
-        h_img, w_img = img_cv.shape[:2]
+        # 确保裁剪目录存在
+        if save_crops and not os.path.exists(CROP_DIR_NAME):
+            os.makedirs(CROP_DIR_NAME)
 
         for i, box in enumerate(sorted_boxes):
-            x_min, y_min, x_max, y_max = box.astype(int)
+            # box 是在 1024x1024 图片上的坐标
+            x_min, y_min, x_max, y_max = box
 
-            # 1. 边界检查 (Clamp)，防止坐标超出图像范围导致报错
-            x_min = max(0, x_min)
-            y_min = max(0, y_min)
-            x_max = min(w_img, x_max)
-            y_max = min(h_img, y_max)
+            # --- 1. 计算扩边 (在 1024 尺度上算，或者映射回去算都可以，这里先算方便) ---
+            if expand_box:
+                w_box = x_max - x_min
+                h_box = y_max - y_min
+                dx = w_box * ratio_w
+                dy = h_box * ratio_h
+                x_min -= dx
+                x_max += dx
+                y_min -= dy
+                y_max += dy
 
-            # 2. 检查有效性
-            if x_max - x_min <= 0 or y_max - y_min <= 0:
+            # --- 2. 坐标映射回原图 (关键步骤) ---
+            # 还原公式：(坐标 - padding) / 缩放比例
+            real_x_min = (x_min - pad_x) / scale
+            real_x_max = (x_max - pad_x) / scale
+            real_y_min = (y_min - pad_y) / scale
+            real_y_max = (y_max - pad_y) / scale
+
+            # --- 3. 边界检查 (针对原图尺寸) ---
+            real_x_min = max(0, int(real_x_min))
+            real_y_min = max(0, int(real_y_min))
+            real_x_max = min(real_w, int(real_x_max))
+            real_y_max = min(real_h, int(real_y_max))
+
+            # 校验有效性
+            if real_x_max - real_x_min <= 0 or real_y_max - real_y_min <= 0:
                 continue
 
-            # 3. 裁剪 (注意：先是在干净的 img_cv 上裁剪，所以没有绿框)
-            crop_img = img_cv[y_min:y_max, x_min:x_max]
+            # --- 4. 高清裁剪 ---
+            if save_crops:
+                crop_img = img_original[real_y_min:real_y_max, real_x_min:real_x_max]
 
-            # 4. 命名：原名-000001.jpg
-            # i+1 表示从 1 开始计数，:06d 表示补零至6位
-            crop_filename = f"{filename_no_ext}-{i + 1:06d}.jpg"
-            crop_save_path = os.path.join(CROP_DIR_NAME, crop_filename)
+                # [可选优化] 如果裁剪出来的图依然很小（比如原图本文就很小），可以用插值放大一点点
+                # 例如高度小于 20 时，放大 2 倍
+                # if crop_img.shape[0] < 20:
+                #     crop_img = cv2.resize(crop_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
 
-            cv2.imwrite(crop_save_path, crop_img)
+                crop_filename = f"{filename_no_ext}-{i + 1:06d}.jpg"
+                crop_save_path = os.path.join(CROP_DIR_NAME, crop_filename)
+                cv2.imwrite(crop_save_path, crop_img)
 
-    # --- 4. 绘图并保存整张结果图 ---
-    for box in final_boxes:
-        x_min, y_min, x_max, y_max = box.astype(int)
-        cv2.rectangle(img_cv, (x_min, y_min), (x_max, y_max), (0, 255, 0), 1)
+            # --- 5. 在预览图(1024版)上画框 ---
+            # 为了画图，我们还是要用回 1024 尺度下的整数坐标
+            # 这里简单 clamp 一下用于画图
+            draw_x_min = max(0, int(x_min))
+            draw_y_min = max(0, int(y_min))
+            draw_x_max = min(input_size, int(x_max))
+            draw_y_max = min(input_size, int(y_max))
 
-    # 保存检测结果全图
+            cv2.rectangle(img_vis, (draw_x_min, draw_y_min), (draw_x_max, draw_y_max), (0, 255, 0), 1)
+
+    # 保存检测结果全图 (依然保存带框的 1024 图，方便预览，文件体积小)
+    # 如果你也想保存高清带框原图，可以在 img_original 上画矩形并保存
     save_path = os.path.join(output_dir, "res_" + filename_full)
-    cv2.imwrite(save_path, img_cv)
-    print(f"[{filename_full}] 检测到 {len(final_boxes)} 个文本框")
+    cv2.imwrite(save_path, img_vis)
 
+    # 打印日志时加上原图尺寸信息
+    print(f"[{filename_full}] (原图: {real_w}x{real_h}) 检测到 {len(final_boxes)} 个文本框")
 
 def main():
     if not os.path.exists(OUTPUT_DIR):
@@ -204,17 +251,23 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
-    print(f"加载模型: {MODEL_PATH}")
-    print(f"裁剪开关: {SAVE_CROPS}")
+
+    # 打印当前配置
+    print("-" * 30)
+    print(f"模型路径: {MODEL_PATH}")
+    print(f"裁剪保存: {SAVE_CROPS} -> {CROP_DIR_NAME}")
+    print(f"边框扩大: {EXPAND_BOX}")
+    if EXPAND_BOX:
+        print(f"  - 宽度扩大: {EXPAND_RATIO_W * 100}%")
+        print(f"  - 高度扩大: {EXPAND_RATIO_H * 100}%")
+    print("-" * 30)
 
     if not os.path.exists(MODEL_PATH):
         print(f"错误: 模型文件不存在。")
         return
 
-    # 加载模型
     model = load_model(MODEL_PATH, device)
 
-    # 处理输入路径
     if os.path.isdir(IMAGE_PATH):
         import glob
         extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp']
@@ -227,10 +280,18 @@ def main():
 
         print(f"共找到 {len(image_files)} 张图像，开始推理...")
         for img_file in image_files:
-            detect(model, img_file, OUTPUT_DIR, INPUT_SIZE, SCORE_THRESHOLD, NMS_THRESHOLD, save_crops=SAVE_CROPS)
+            detect(model, img_file, OUTPUT_DIR, INPUT_SIZE, SCORE_THRESHOLD, NMS_THRESHOLD,
+                   save_crops=SAVE_CROPS,
+                   expand_box=EXPAND_BOX,
+                   ratio_w=EXPAND_RATIO_W,
+                   ratio_h=EXPAND_RATIO_H)
 
     elif os.path.isfile(IMAGE_PATH):
-        detect(model, IMAGE_PATH, OUTPUT_DIR, INPUT_SIZE, SCORE_THRESHOLD, NMS_THRESHOLD, save_crops=SAVE_CROPS)
+        detect(model, IMAGE_PATH, OUTPUT_DIR, INPUT_SIZE, SCORE_THRESHOLD, NMS_THRESHOLD,
+               save_crops=SAVE_CROPS,
+               expand_box=EXPAND_BOX,
+               ratio_w=EXPAND_RATIO_W,
+               ratio_h=EXPAND_RATIO_H)
     else:
         print(f"错误: 路径不存在 -> {IMAGE_PATH}")
 
