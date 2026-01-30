@@ -14,7 +14,7 @@ from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
 # 确保这里的路径是你最新训练出来的模型 (ReLU版本的权重)
-MODEL_PATH = "detection/checkpoints/best_detection_490_loss_0.0880.pth"
+MODEL_PATH = "detection/checkpoints/best_detection_epoch_981_loss_0.06583.pth"
 IMAGE_PATH = "detection/data/test"
 OUTPUT_DIR = "detection/data/test_results/4"
 INPUT_SIZE = 1024  # 保持与训练一致
