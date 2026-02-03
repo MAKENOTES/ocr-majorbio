@@ -19,12 +19,14 @@ OUTPUT_DIR = "detection/data/test_results/5"
 
 # 1. 裁剪保存开关
 SAVE_CROPS = True
-CROP_DIR_NAME = "detection/data/crops/20260130"
+CROP_DIR_NAME = "detection/data/crops/20260131"
 
-# 2. [新增] 边框扩大开关 (Padding)
-EXPAND_BOX = True  # 是否开启扩大
-EXPAND_RATIO_W = 0.05  # 宽度扩大比例 (例如 0.05 = 左右各增加宽度的 5%)
-EXPAND_RATIO_H = 0.10  # 高度扩大比例 (例如 0.10 = 上下各增加高度的 10%)
+# 2. [修改点] 边框扩大开关 (Padding)
+EXPAND_BOX = True
+# [重要修改] 现在的含义是：左右扩充量 = 高度 * 0.3 (即左右各增加约 1/3 个字高)
+# 之前是 0.05 (宽度的5%)，现在改为 0.30 (高度的30%)，数值调大是因为基数变小了
+EXPAND_RATIO_W = 0.30
+EXPAND_RATIO_H = 0.10  # 上下扩充量 = 高度 * 0.1
 
 INPUT_SIZE = 1024
 SCORE_THRESHOLD = 0.8
@@ -149,7 +151,6 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
     img_vis = cv2.cvtColor(np.array(resized_image), cv2.COLOR_RGB2BGR)
 
     # 2. [关键] img_original: 读取原图，用于高清裁剪
-    # 注意：cv2.imread 读取的是 BGR，如果后面要用 PIL 处理可能需要转 RGB，但这里直接保存 jpg 无所谓
     img_original = cv2.imread(image_path)
     if img_original is None:
         print(f"原图读取失败: {image_path}")
@@ -162,7 +163,6 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
     filename_no_ext = os.path.splitext(filename_full)[0]
 
     # --- 计算 ResizeAndPad 的缩放比例和偏移量，用于坐标映射 ---
-    # 假设 ResizeAndPad 的逻辑是：保持长宽比，长边缩放到 input_size，短边居中补零
     scale = input_size / max(orig_h, orig_w)
 
     # 计算 resize 后的实际内容宽高
@@ -186,18 +186,26 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
             # box 是在 1024x1024 图片上的坐标
             x_min, y_min, x_max, y_max = box
 
-            # --- 1. 计算扩边 (在 1024 尺度上算，或者映射回去算都可以，这里先算方便) ---
+            # --- 1. 计算扩边 (方案一：基于高度的宽度扩充) ---
             if expand_box:
                 w_box = x_max - x_min
                 h_box = y_max - y_min
-                dx = w_box * ratio_w
+
+                # 【修改点】核心逻辑变更：
+                # 宽度扩充量 (dx) 改为使用高度 (h_box) 作为基准。
+                # 这样可以避免长文本 (w_box 很大) 导致左右留白过大的问题。
+                # ratio_w 此时建议设置为 0.2 ~ 0.5 之间。
+                dx = h_box * ratio_w
+
+                # 高度扩充量保持不变，依然基于高度
                 dy = h_box * ratio_h
+
                 x_min -= dx
                 x_max += dx
                 y_min -= dy
                 y_max += dy
 
-            # --- 2. 坐标映射回原图 (关键步骤) ---
+            # --- 2. 坐标映射回原图 ---
             # 还原公式：(坐标 - padding) / 缩放比例
             real_x_min = (x_min - pad_x) / scale
             real_x_max = (x_max - pad_x) / scale
@@ -218,8 +226,7 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
             if save_crops:
                 crop_img = img_original[real_y_min:real_y_max, real_x_min:real_x_max]
 
-                # [可选优化] 如果裁剪出来的图依然很小（比如原图本文就很小），可以用插值放大一点点
-                # 例如高度小于 20 时，放大 2 倍
+                # [可选] 小图自动插值放大，防止太糊
                 # if crop_img.shape[0] < 20:
                 #     crop_img = cv2.resize(crop_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
 
@@ -229,7 +236,6 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
 
             # --- 5. 在预览图(1024版)上画框 ---
             # 为了画图，我们还是要用回 1024 尺度下的整数坐标
-            # 这里简单 clamp 一下用于画图
             draw_x_min = max(0, int(x_min))
             draw_y_min = max(0, int(y_min))
             draw_x_max = min(input_size, int(x_max))
@@ -237,13 +243,12 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
 
             cv2.rectangle(img_vis, (draw_x_min, draw_y_min), (draw_x_max, draw_y_max), (0, 255, 0), 1)
 
-    # 保存检测结果全图 (依然保存带框的 1024 图，方便预览，文件体积小)
-    # 如果你也想保存高清带框原图，可以在 img_original 上画矩形并保存
+    # 保存检测结果全图
     save_path = os.path.join(output_dir, "res_" + filename_full)
     cv2.imwrite(save_path, img_vis)
 
-    # 打印日志时加上原图尺寸信息
     print(f"[{filename_full}] (原图: {real_w}x{real_h}) 检测到 {len(final_boxes)} 个文本框")
+
 
 def main():
     if not os.path.exists(OUTPUT_DIR):
@@ -258,8 +263,8 @@ def main():
     print(f"裁剪保存: {SAVE_CROPS} -> {CROP_DIR_NAME}")
     print(f"边框扩大: {EXPAND_BOX}")
     if EXPAND_BOX:
-        print(f"  - 宽度扩大: {EXPAND_RATIO_W * 100}%")
-        print(f"  - 高度扩大: {EXPAND_RATIO_H * 100}%")
+        print(f"  - 宽度扩大: 左右各 {EXPAND_RATIO_W * 100}% (基于字高)")
+        print(f"  - 高度扩大: 上下各 {EXPAND_RATIO_H * 100}% (基于字高)")
     print("-" * 30)
 
     if not os.path.exists(MODEL_PATH):

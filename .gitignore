@@ -10,6 +10,7 @@ detection/data/
 detection/checkpoints/
 test_results/
 detection/runs
+recognition/data/
 
 
 
