@@ -9,8 +9,11 @@ outputs/
 detection/data/
 detection/checkpoints/
 test_results/
-detection/runs
+detection/runs/
 recognition/data/
+recognition/runs/
+recognition/checkpoints/
+
 
 
 
