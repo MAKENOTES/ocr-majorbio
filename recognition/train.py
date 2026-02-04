@@ -27,7 +27,7 @@ TRAIN_ANNOTATION = "recognition/data/train_annotation.txt"
 VALID_ANNOTATION = "recognition/data/valid_annotation.txt"
 KEYS_PATH = "recognition/keys.txt"
 IMG_HEIGHT = 32
-IMG_WIDTH = 320
+IMG_WIDTH = 1800
 NUM_CHANNELS = 1
 
 # 训练配置

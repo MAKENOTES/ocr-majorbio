@@ -33,16 +33,13 @@ class ResizeAndPad:
         scale = self.target_h / h
         new_w = int(w * scale)
 
-        # 如果缩放后宽度超过目标宽度，则需要截断（或者再次缩放，这里选择截断处理长文本）
+        # 如果缩放后宽度超过目标宽度，则需要截断。TODO给足够的宽度。
         if new_w > self.target_w:
-            new_w = self.target_w
-            # 这种情况下，高度可能不足，需要重新计算
-            # img = img.resize((self.target_w, self.target_h), Image.BILINEAR)
             # 简单策略：强制 Resize 到目标尺寸 (针对超长文本)
-            img = img.resize((self.target_w, self.target_h), Image.Resampling.BICUBIC)
-            new_w = self.target_w
+            img = img.resize((self.target_w, self.target_h), Image.Resampling.LANCZOS)
+            print(f"警告: 图像 {new_w} 调整后不匹配目标宽度，强制适应。")
         else:
-            img = img.resize((new_w, self.target_h), Image.Resampling.BICUBIC)
+            img = img.resize((new_w, self.target_h), Image.Resampling.LANCZOS)
 
         # 2. 创建画布并 Padding (右侧补零)
         # 如果是灰度图模式 'L'，如果是 RGB 模式 'RGB'
@@ -71,14 +68,14 @@ class TextRecognitionDataset(Dataset):
                     parts = line.strip().split(',')
                     if len(parts) >= 2:
                         image_path = os.path.join(annotation_dir, parts[0].strip())
-                        label = parts[1].strip().replace('"', '')
+                        label = ','.join(parts[1:]).strip().replace('"', '')  # 处理标签中逗号
                         self.image_paths.append(image_path)
                         self.labels.append(label)
         else:
             print(f"警告: 标注文件不存在 {annotation_path}")
 
         # 定义变换流程
-        self.resize_pad = ResizeAndPad(img_height, img_width, pad_value=127) # 填充灰色
+        self.resize_pad = ResizeAndPad(img_height, img_width, pad_value=255) # 填充白色  因为图片在填充前进行了 image = r
 
         # 标准化参数 (ImageNet 均值方差，加速收敛)
         self.normalize = transforms.Normalize(mean=[0.5], std=[0.5])
