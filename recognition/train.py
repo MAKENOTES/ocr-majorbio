@@ -48,24 +48,36 @@ def debug_visualization(model, converter, dataset_loader):
     print("\n[Debug] 采样检查预测效果:")
     try:
         # 获取一个 Batch
-        images, labels = next(iter(dataset_loader))
+        # 注意：dataset_loader 已经配置了 collate_fn，返回的是 (images, labels)
+        batch = next(iter(dataset_loader))
+        images, labels = batch
         images = images.to(DEVICE)
 
         with torch.no_grad():
-            preds = model(images)  # (Seq, Batch, C)
-            preds = preds.transpose(0, 1)  # (Batch, Seq, C)
+            preds = model(images)  # 输出形状: (Seq, Batch, C)
 
-        decoded_preds = converter.decode(preds)
+            # --- [修复] ---
+            # 不要在这里转置！converter.decode 内部会自动处理 (Seq, Batch, C) 的形状。
+            # 如果这里转置了，converter 内部误判后会再次转置，导致维度错乱。
+            # preds = preds.transpose(0, 1) <--- 删除这行
+
+        # 直接传入 (Seq, Batch, C)
+        decoded_preds = converter.decode(preds.cpu())
 
         for i in range(min(3, len(labels))):
             print(f"  样本 {i + 1}:")
             print(f"    GT  : {labels[i]}")
             print(f"    Pred: {decoded_preds[i]}")
 
+            # 简单对比一下，给个直观的正确/错误标记
+            status = "✅" if labels[i] == decoded_preds[i] else "❌"
+            print(f"    Result: {status}")
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Debug 失败: {e}")
     print("-" * 30)
-
 
 def train():
     print(f"使用设备: {DEVICE}")
