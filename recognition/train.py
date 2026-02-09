@@ -1,5 +1,8 @@
 """
-训练CRNN文本识别模型的主脚本。
+训练CRNN文本识别模型的主脚本 (优化版)。
+包含:
+1. 延迟保存机制 (START_SAVE_EPOCH)
+2. Top-K 最佳模型保存 (根据验证集损失)
 """
 import os
 import sys
@@ -22,18 +25,22 @@ from recognition.model import CRNN
 
 # -- 全局配置常量 --
 TRAIN_ANNOTATION = "recognition/data/train_annotation.txt"
-VALID_ANNOTATION = "recognition/data/valid_annotation.txt"
+VALID_ANNOTATION = "recognition/data/val_annotation.txt"
 KEYS_PATH = "recognition/keys.txt"
 IMG_HEIGHT = 32
 IMG_WIDTH = 1800
 NUM_CHANNELS = 1
 
 # 训练配置
-BATCH_SIZE = 128
+BATCH_SIZE = 108
 EPOCHS = 200
-LEARNING_RATE = 3e-4 # 稍微提高初始 LR，配合 Scheduler 使用
+LEARNING_RATE = 3e-4
 CHECKPOINT_DIR = "recognition/checkpoints/"
 SAVE_INTERVAL = 5
+
+# --- [新增配置] 保存策略 ---
+START_SAVE_EPOCH = 180   # 从第 50 个 Epoch 开始保存 (跳过前期不稳定的模型)
+KEEP_TOP_K = 3          # 只保留损失最小的 3 个最佳模型
 
 # 硬件配置
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,35 +54,20 @@ def debug_visualization(model, converter, dataset_loader):
     model.eval()
     print("\n[Debug] 采样检查预测效果:")
     try:
-        # 获取一个 Batch
-        # 注意：dataset_loader 已经配置了 collate_fn，返回的是 (images, labels)
         batch = next(iter(dataset_loader))
         images, labels = batch
         images = images.to(DEVICE)
 
         with torch.no_grad():
-            preds = model(images)  # 输出形状: (Seq, Batch, C)
+            preds = model(images)
 
-            # --- [修复] ---
-            # 不要在这里转置！converter.decode 内部会自动处理 (Seq, Batch, C) 的形状。
-            # 如果这里转置了，converter 内部误判后会再次转置，导致维度错乱。
-            # preds = preds.transpose(0, 1) <--- 删除这行
-
-        # 直接传入 (Seq, Batch, C)
         decoded_preds = converter.decode(preds.cpu())
 
         for i in range(min(3, len(labels))):
-            print(f"  样本 {i + 1}:")
-            print(f"    GT  : {labels[i]}")
-            print(f"    Pred: {decoded_preds[i]}")
-
-            # 简单对比一下，给个直观的正确/错误标记
             status = "✅" if labels[i] == decoded_preds[i] else "❌"
-            print(f"    Result: {status}")
+            print(f"  Sample {i+1}: GT='{labels[i]}' | Pred='{decoded_preds[i]}' | {status}")
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         print(f"Debug 失败: {e}")
     print("-" * 30)
 
@@ -101,10 +93,10 @@ def train():
     # 损失函数
     criterion = nn.CTCLoss(blank=0, zero_infinity=True).to(DEVICE)
 
-    # 优化器: 使用 AdamW 替代 Adam，泛化性更好
+    # 优化器
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
 
-    # [新增] 学习率调度器: 当 Loss 不再下降时，减少 LR
+    # 学习率调度器
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=3, min_lr=1e-6
     )
@@ -134,8 +126,12 @@ def train():
     else:
         print("警告: 未找到验证集标注文件。")
 
-    print("开始训练...")
+    print(f"开始训练... (将在 Epoch {START_SAVE_EPOCH} 后开始保存模型)")
     global_step = 0
+
+    # --- [新增] 最佳模型记录列表 ---
+    # 格式: [{'path': str, 'loss': float, 'epoch': int}, ...]
+    best_checkpoints = []
 
     for epoch in range(1, EPOCHS + 1):
         model.train()
@@ -158,10 +154,7 @@ def train():
 
             optimizer.zero_grad()
             loss.backward()
-
-            # [新增] 梯度裁剪: 防止 LSTM 梯度爆炸
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-
             optimizer.step()
 
             current_loss = loss.item()
@@ -171,53 +164,106 @@ def train():
             writer.add_scalar('Train/Batch_Loss', current_loss, global_step)
             global_step += 1
 
-        avg_loss = total_loss / len(train_loader)
-        print(f"第 {epoch} 轮平均损失: {avg_loss:.4f}")
-        writer.add_scalar('Train/Epoch_Loss', avg_loss, epoch)
+        train_avg_loss = total_loss / len(train_loader)
+        print(f"Epoch {epoch} Train Loss: {train_avg_loss:.4f}")
+        writer.add_scalar('Train/Epoch_Loss', train_avg_loss, epoch)
 
-        # 更新学习率
-        scheduler.step(avg_loss)
+        # Debug 可视化
+        # if epoch % 2 == 0:
+        #     debug_visualization(model, converter, train_loader)
 
-        # 每 2 个 Epoch 进行一次可视化 Debug
-        if epoch % 2 == 0:
-            debug_visualization(model, converter, train_loader)
+        # 验证步骤
+        val_metric_loss = train_avg_loss # 默认使用训练 Loss
+        if valid_loader and epoch >= START_SAVE_EPOCH :
+            # 这里的 evaluate 已经修改为返回 (acc, loss)
+            val_acc, val_loss = evaluate(model, valid_loader, converter, criterion)
+            val_metric_loss = val_loss # 如果有验证集，优先使用验证集 Loss 评判最佳模型
 
-        if valid_loader:
-            val_acc = evaluate(model, valid_loader, converter)
+            print(f"Epoch {epoch} Valid Acc: {val_acc:.4f} | Valid Loss: {val_loss:.4f}")
             writer.add_scalar('Validation/Accuracy', val_acc, epoch)
+            writer.add_scalar('Validation/Loss', val_loss, epoch)
 
-        if epoch % SAVE_INTERVAL == 0:
-            checkpoint_path = os.path.join(CHECKPOINT_DIR, f"recognition_epoch_{epoch}.pth")
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"检查点已保存至 {checkpoint_path}")
+            # 使用验证集 Loss 更新 Scheduler
+            scheduler.step(val_loss)
+        else:
+            scheduler.step(train_avg_loss)
+
+        # --- 保存策略逻辑 ---
+        if epoch >= START_SAVE_EPOCH:
+
+            # 1. 常规周期性保存
+            if epoch % SAVE_INTERVAL == 0:
+                checkpoint_path = os.path.join(CHECKPOINT_DIR, f"epoch_{epoch}.pth")
+                torch.save(model.state_dict(), checkpoint_path)
+                print(f"周期性保存: {checkpoint_path}")
+
+            # 2. 最佳模型保存 (Top-K)
+            # 检查是否值得保存：列表没满，或者当前Loss小于列表里最大的Loss
+            should_save_best = False
+            if len(best_checkpoints) < KEEP_TOP_K:
+                should_save_best = True
+            elif val_metric_loss < best_checkpoints[-1]['loss']:
+                should_save_best = True
+
+            if should_save_best:
+                best_name = f"best_loss_{val_metric_loss:.4f}_epoch_{epoch}.pth"
+                best_path = os.path.join(CHECKPOINT_DIR, best_name)
+
+                # 保存新模型
+                torch.save(model.state_dict(), best_path)
+                print(f"发现新最佳模型 ({val_metric_loss:.4f})! 已保存: {best_path}")
+
+                # 加入列表并重新排序
+                best_checkpoints.append({'path': best_path, 'loss': val_metric_loss, 'epoch': epoch})
+                best_checkpoints.sort(key=lambda x: x['loss']) # 按 Loss 从小到大排序
+
+                # 如果超过 K 个，移除 Loss 最大的那个 (列表末尾)
+                if len(best_checkpoints) > KEEP_TOP_K:
+                    worst_ckpt = best_checkpoints.pop() # 移除最后一个
+                    if os.path.exists(worst_ckpt['path']):
+                        try:
+                            os.remove(worst_ckpt['path'])
+                            print(f"  已移除旧的最佳模型: {worst_ckpt['path']}")
+                        except Exception as e:
+                            print(f"  移除文件失败: {e}")
 
     writer.close()
 
-def evaluate(model, dataloader, converter):
+def evaluate(model, dataloader, converter, criterion):
+    """
+    修改后的验证函数：同时计算准确率和验证集 Loss
+    """
     model.eval()
     correct_predictions = 0
     total_samples = 0
+    total_loss = 0.0
 
-    print("\n--- 开始验证 ---")
     with torch.no_grad():
         for images, labels in tqdm(dataloader, desc="Validating", leave=False):
             images = images.to(DEVICE)
             preds = model(images)
+
+            # --- 计算验证 Loss ---
+            text, length = converter.encode(labels)
+            text = text.to(DEVICE)
+            length = length.to(DEVICE)
+            preds_size = torch.IntTensor([preds.size(0)] * images.size(0)).to(DEVICE)
+
+            loss = criterion(preds, text, preds_size, length)
+            total_loss += loss.item()
+            # --------------------
+
             decoded_preds = converter.decode(preds.cpu())
 
             total_samples += len(labels)
             for pred, gt in zip(decoded_preds, labels):
-                # 简单去除空格比较，防止 padding 引起的误差
                 if pred.strip() == gt.strip():
                     correct_predictions += 1
 
     accuracy = correct_predictions / total_samples if total_samples > 0 else 0.0
-    print(f"验证集准确率: {accuracy:.4f}")
-    if total_samples > 0:
-        print(f"  示例 GT: {labels[0]}")
-        print(f"  示例 Pred: {decoded_preds[0]}\n")
+    avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
 
-    return accuracy
+    return accuracy, avg_loss
 
 if __name__ == "__main__":
     train()

@@ -104,7 +104,7 @@ class CRNN(nn.Module):
             batch_first=False
         )
 
-        self.embedding = nn.Linear(nh * 2, n_class + 1)
+        self.embedding = nn.Linear(nh * 2, n_class)
         self._initialize_weights()
 
     def forward(self, input):

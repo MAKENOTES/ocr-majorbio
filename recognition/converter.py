@@ -8,10 +8,16 @@ class LabelConverter:
     在文本标签和用于CTC Loss的整数序列之间进行转换。
     """
     def __init__(self, keys_path: str):
+        self.keys = []
         with open(keys_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            # 移除文件末尾的换行符，但绝对保留开头的空格
-            self.keys = content.rstrip('\n').rstrip('\r')
+            for line in f:
+                # 去掉换行符，但保留行内的空格
+                char = line.strip('\n').strip('\r')
+                # 过滤掉真正的空行（防止文件末尾多余的空行被读入）
+                # 注意：如果你的 keys.txt 里空格是写成 " \n" (有一个空格字符)，len 也是 1，不会被过滤，是安全的。
+                if len(char) == 0:
+                    continue
+                self.keys.append(char)
 
         # 0: [blank], 1: [UNK] (未知字符), 2...: 正常字符
         self.char2idx = {'[blank]': 0, '[UNK]': 1}
@@ -23,6 +29,12 @@ class LabelConverter:
             self.idx2char[idx] = char
 
         self.num_classes = len(self.char2idx)
+        # 3. 【新增】调试打印，确认空格是否被读进来了
+        if ' ' in self.char2idx:
+            print(f"提示: 检测到 '空格' 字符在字典中，ID为 {self.char2idx[' ']}")
+        else:
+            print("注意: 字典中未检测到 '空格' 字符。如果你的图片包含空格，请检查 keys.txt")
+
         print(f"Converter 初始化完成: 字典大小 {len(self.keys)}, 总类别数 {self.num_classes} (含blank/unk)")
 
     def encode(self, text: list[str]) -> tuple[torch.Tensor, torch.Tensor]:

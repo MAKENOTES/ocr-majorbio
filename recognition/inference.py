@@ -1,148 +1,161 @@
-"""
-使用训练好的 CRNN 模型进行单张或批量图片推理的脚本。
-"""
 import os
-import sys
 import torch
-from PIL import Image
-from torchvision import transforms
+import glob
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+import sys
 
-# -- 动态添加项目根目录到 sys.path，防止找不到模块 --
+# -- 动态添加项目根目录到 sys.path --
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from recognition.model import CRNN
-from recognition.converter import LabelConverter
+# --- 导入项目模块 ---
+# converter: 用于字符解码
+from converter import LabelConverter
+# model: 定义网络结构
+from model import CRNN
+# dataset: 复用其中的推理数据集类和动态Padding整理函数
+# 注意：前提是你已经按照上一步修改了 dataset.py
+from dataset import InferenceDataset, dynamic_padding_collate_fn
 
-# --- 配置区域 ---
-# 字典文件路径
-KEYS_PATH = os.path.join(project_root, "recognition/keys.txt")
-# 训练好的权重文件路径 (请修改为你最好的 checkpoint)
-CHECKPOINT_PATH = os.path.join(project_root, "recognition/checkpoints/recognition_epoch_200.pth")
-# 待测试的图片路径 (可以是单个文件，也可以是文件夹)
-TEST_IMAGE_PATH = os.path.join(project_root, "recognition/data/test_images")
+# ================= 配置区域 (常量) =================
+# 1. 核心路径
+MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/recognition_epoch_200.pth")  # 训练好的模型路径
+KEYS_PATH = os.path.join(project_root, "recognition/keys.txt")  # 字典路径 (必须与训练一致)
+INPUT_PATH = os.path.join(project_root, "recognition/data/test_images")  # 待推理的图片文件夹 (或单张图片路径)
+OUTPUT_FILE = None  # 结果保存路径 (设为 None 则只打印)
 
-# 模型参数 (必须与训练时一致)
-IMG_HEIGHT = 32
-NUM_CHANNELS = 1  # 灰度输入
-HIDDEN_SIZE = 512  # 训练时你改为了 512
+# 2. 模型参数 (需与训练保持一致)
+IMG_HEIGHT = 32  # 固定高度
+NUM_CHANNELS = 1  # 1=灰度, 3=RGB
+
+# 3. 推理参数
+BATCH_SIZE = 1  # 批量大小 (显存允许可调大，例如 64, 128)
+NUM_WORKERS = 2  # 数据加载线程数
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class OCRPredictor:
-    def __init__(self, keys_path, checkpoint_path, device):
-        self.device = device
+# ==================================================
 
-        # 1. 初始化转换器
-        if not os.path.exists(keys_path):
-            raise FileNotFoundError(f"未找到字典文件: {keys_path}")
-        self.converter = LabelConverter(keys_path)
+def load_network():
+    """
+    加载模型和字典
+    """
+    if not os.path.exists(KEYS_PATH):
+        raise FileNotFoundError(f"字典文件未找到: {KEYS_PATH}")
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(f"模型文件未找到: {MODEL_PATH}")
 
-        # 2. 初始化模型
-        # 注意: n_class 必须包含 blank/unk，由 converter 自动计算
-        self.model = CRNN(
-            img_height=IMG_HEIGHT,
-            nc=NUM_CHANNELS,
-            n_class=self.converter.num_classes,
-            nh=HIDDEN_SIZE
-        ).to(self.device)
+    print(f"正在初始化网络 (Device: {DEVICE})...")
 
-        # 3. 加载权重
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"未找到模型权重: {checkpoint_path}")
+    # 1. 加载字典 (获取类别数)
+    converter = LabelConverter(KEYS_PATH)
 
-        print(f"正在加载模型权重: {checkpoint_path} ...")
-        # map_location 确保在 CPU 机器上也能加载 CUDA 训练的权重
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint)
-        self.model.eval()
-        print("模型加载完成!")
+    # 2. 初始化模型结构
+    model = CRNN(
+        img_height=IMG_HEIGHT,
+        nc=NUM_CHANNELS,
+        n_class=converter.num_classes
+    ).to(DEVICE)
 
-        # 4. 定义预处理 (与 dataset.py 保持一致)
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
-        ])
+    # 3. 加载权重
+    print(f"加载权重: {MODEL_PATH}")
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
 
-    def preprocess_image(self, image_path):
-        """
-        读取并预处理图片：转灰度 -> 等比例缩放高度到32 -> 归一化
-        """
+    # 兼容处理 state_dict (有的代码保存整个 checkpoint dict，有的只保存 state_dict)
+    if 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+
+    model.eval()
+    return model, converter
+
+
+def main():
+    # 1. 收集图片路径
+    image_paths = []
+    if os.path.isdir(INPUT_PATH):
+        # 支持常见图片格式
+        types = ('*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tif')
+        for t in types:
+            image_paths.extend(glob.glob(os.path.join(INPUT_PATH, t)))
+            image_paths.extend(glob.glob(os.path.join(INPUT_PATH, t.upper())))
+    elif os.path.isfile(INPUT_PATH):
+        image_paths = [INPUT_PATH]
+
+    if not image_paths:
+        print(f"错误: 在 {INPUT_PATH} 未找到任何图片。")
+        return
+
+    print(f"发现 {len(image_paths)} 张待处理图片。")
+
+    # 2. 加载模型与转换器
+    model, converter = load_network()
+
+    # 3. 构建 DataLoader
+    # 直接使用 dataset.py 中封装好的 InferenceDataset
+    # 它会自动处理读取、灰度转换、Resize(保持比例)、Normalize
+    dataset = InferenceDataset(
+        image_paths=image_paths,
+        img_height=IMG_HEIGHT,
+        num_channels=NUM_CHANNELS
+    )
+
+    # 使用 dynamic_padding_collate_fn 实现 Batch 内动态宽度的对齐
+    loader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        collate_fn=dynamic_padding_collate_fn
+    )
+
+    # 4. 执行推理
+    results = []
+    print(f"开始推理 (Batch Size: {BATCH_SIZE})...")
+
+    with torch.no_grad():
+        # loader 返回: (padded_images, paths)
+        for images, paths in tqdm(loader, unit="batch"):
+            images = images.to(DEVICE)
+
+            # 前向传播 -> (SeqLen, Batch, NumClasses)
+            preds = model(images)
+
+            # 解码 -> List[str]
+            # converter.decode 内部处理了 Softmax/Argmax 和 CTC 的去重逻辑
+            pred_texts = converter.decode(preds.cpu())
+
+            # 收集结果
+            for path, text in zip(paths, pred_texts):
+                filename = os.path.basename(path)
+                results.append((filename, text))
+
+    # 5. 输出与保存
+    print("-" * 50)
+    if OUTPUT_FILE:
         try:
-            # 读取图片
-            img = Image.open(image_path).convert('RGB')
-
-            # 转灰度 (策略与 dataset.py 一致: convert('L'))
-            if NUM_CHANNELS == 1:
-                img = img.convert('L')
-
-            # Resize: 高度固定 32，宽度按比例缩放
-            w, h = img.size
-            scale = IMG_HEIGHT / h
-            new_w = int(w * scale)
-            # 限制最小宽度，防止报错
-            new_w = max(4, new_w)
-
-            img = img.resize((new_w, IMG_HEIGHT), Image.Resampling.LANCZOS)
-
-            # 转换和归一化
-            img_tensor = self.transform(img)
-
-            # 增加 Batch 维度: [C, H, W] -> [1, C, H, W]
-            return img_tensor.unsqueeze(0)
-
+            with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+                for filename, text in results:
+                    line = f"{filename}\t{text}"
+                    f.write(line + "\n")
+                    # 可选: 打印到控制台以便查看
+                    # print(line)
+            print(f"成功: 全部结果已保存至 -> {OUTPUT_FILE}")
         except Exception as e:
-            print(f"处理图片失败 {image_path}: {e}")
-            return None
-
-    def predict(self, image_path):
-        """
-        对单张图片进行推理
-        """
-        img_tensor = self.preprocess_image(image_path)
-        if img_tensor is None:
-            return None
-
-        img_tensor = img_tensor.to(self.device)
-
-        with torch.no_grad():
-            # 模型输出: [SeqLen, Batch, NumClasses]
-            preds = self.model(img_tensor)
-
-            # 注意: 这里不要手动 transpose，直接交给 converter.decode
-            # decode 内部逻辑: if shape[1] != num_classes -> transpose
-            # 输入 (Seq, 1, C) -> 内部转为 (1, Seq, C) -> 正确解码
-            decoded_texts = self.converter.decode(preds.cpu())
-
-        return decoded_texts[0]
+            print(f"保存文件失败: {e}")
+            # 如果保存失败，兜底打印到控制台
+            for filename, text in results:
+                print(f"{filename}\t{text}")
+    else:
+        # 如果没有配置输出文件，直接打印
+        print("识别结果:")
+        for filename, text in results:
+            print(f"{filename}\t{text}")
 
 
-# --- 主程序入口 ---
 if __name__ == "__main__":
-    # 实例化预测器
-    try:
-        predictor = OCRPredictor(KEYS_PATH, CHECKPOINT_PATH, DEVICE)
-
-        # 模式 1: 测试单张图片
-        if os.path.isfile(TEST_IMAGE_PATH):
-            print(f"\n正在识别: {TEST_IMAGE_PATH}")
-            result = predictor.predict(TEST_IMAGE_PATH)
-            print(f"识别结果: {result}")
-
-        # 模式 2: 测试文件夹下的所有图片
-        elif os.path.isdir(TEST_IMAGE_PATH):
-            print(f"\n正在批量识别文件夹: {TEST_IMAGE_PATH}")
-            image_files = [f for f in os.listdir(TEST_IMAGE_PATH) if
-                           f.lower().endswith(('.jpg', '.png', '.jpeg', '.bmp'))]
-
-            for img_file in image_files:
-                full_path = os.path.join(TEST_IMAGE_PATH, img_file)
-                result = predictor.predict(full_path)
-                print(f"[{img_file}] -> {result}")
-        else:
-            print(f"错误: 路径不存在 {TEST_IMAGE_PATH}")
-
-    except Exception as e:
-        print(f"发生错误: {e}")
+    main()
