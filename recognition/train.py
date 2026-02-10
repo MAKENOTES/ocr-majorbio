@@ -93,6 +93,23 @@ def evaluate(model, dataloader, converter, criterion):
 
     return accuracy, avg_loss
 
+def log_gradient_norms(model, writer, global_step):
+    total_norm = 0.0
+    max_grad = 0.0
+    param_count = 0
+
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            grad_norm = p.grad.data.norm(2)
+            total_norm += grad_norm.item() ** 2
+            max_grad = max(max_grad, p.grad.data.abs().max().item())
+            param_count += 1
+
+    total_norm = total_norm ** 0.5
+
+    writer.add_scalar("Grad/Total_L2_Norm", total_norm, global_step)
+    writer.add_scalar("Grad/Max_Abs_Grad", max_grad, global_step)
+
 
 def train():
     print(f"当前使用的计算设备: {DEVICE}")
@@ -192,6 +209,11 @@ def train():
             loss.backward()
             # 梯度裁剪，防止梯度爆炸
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+
+            # 🔍 梯度监控（每 N step 记录一次，防止 TB 太大）
+            if global_step % 50 == 0:
+                log_gradient_norms(model, writer, global_step)
+
             optimizer.step()
 
             # Logging
@@ -246,7 +268,7 @@ def train():
                     should_save_best = True
 
                 if should_save_best:
-                    best_name = f"best_loss_{scheduler_metric:.4f}_epoch_{epoch}.pth"
+                    best_name = f"{int(time.time())}best_loss_{scheduler_metric:.4f}_epoch_{epoch}.pth"
                     best_path = os.path.join(CHECKPOINT_DIR, best_name)
 
                     torch.save(model.state_dict(), best_path)

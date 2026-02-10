@@ -10,6 +10,8 @@ opencv-python==4.12.0.88
 Pillow==12.0.0
 tqdm==4.67.1
 
+pip install albumentations
+
 
 tensorboard
 tensorboard --logdir=detection/runs
