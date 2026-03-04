@@ -22,7 +22,7 @@ from dataset import InferenceDataset, dynamic_padding_collate_fn
 
 # ================= 配置区域 (常量) =================
 # 1. 核心路径
-MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/1772518513best_loss_0.0089_epoch_58.pth")  # 训练好的模型路径
+MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/1772595178best_loss_0.0327_epoch_59.pth")  # 训练好的模型路径
 KEYS_PATH = os.path.join(project_root, "recognition/keys.txt")  # 字典路径 (必须与训练一致)
 INPUT_PATH = os.path.join(project_root, "recognition/data/test_images")  # 待推理的图片文件夹 (或单张图片路径)
 OUTPUT_FILE = None  # 结果保存路径 (设为 None 则只打印)

@@ -103,6 +103,18 @@ def dynamic_padding_collate_fn(batch):
 # 2. 基础数据集类 (封装通用逻辑)
 # ==========================================
 
+class AddGaussianNoise(object):
+    def __init__(self, mean=0.0, std=0.02):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, tensor):
+        noise = torch.randn(tensor.size()) * self.std + self.mean
+        return tensor + noise
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(mean={self.mean}, std={self.std})"
+
 class BaseTextDataset(Dataset):
     """
     文本识别数据集基类。
@@ -117,10 +129,54 @@ class BaseTextDataset(Dataset):
         # 定义 Transform
         if is_train:
             self.transform = transforms.Compose([
-                # 训练集：加入颜色抖动
-                transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2),
+                # 训练集：
+                # 1️⃣ 轻微旋转（保持文本可读）
+                transforms.RandomRotation(
+                    degrees=2,
+                    fill=255  # 白底图像很重要
+                ),
+
+                # 2️⃣ 轻微透视扰动
+                transforms.RandomPerspective(
+                    distortion_scale=0.2,
+                    p=0.5
+                ),
+
+                # 3️⃣ 颜色扰动
+                transforms.ColorJitter(
+                    brightness=0.4,
+                    contrast=0.4,
+                    saturation=0.2
+                ),
+
+                # 4️⃣ 转 tensor
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5], std=[0.5])
+
+                # 5️⃣ 高斯模糊（模拟拍照虚焦）
+                transforms.RandomApply(
+                    [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))],
+                    p=0.3
+                ),
+
+                # 6️⃣ 添加轻微高斯噪声
+                transforms.RandomApply(
+                    [AddGaussianNoise(0., 0.02)],
+                    p=0.3
+                ),
+
+                # 7️⃣ 随机擦除（必须在 ToTensor 之后）
+                transforms.RandomErasing(
+                    p=0.3,
+                    scale=(0.01, 0.05),
+                    ratio=(0.3, 3.3),
+                    value=0
+                ),
+
+                # 8️⃣ 归一化
+                transforms.Normalize(
+                    mean=[0.5],
+                    std=[0.5]
+                )
             ])
         else:
             self.transform = transforms.Compose([

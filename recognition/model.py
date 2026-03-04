@@ -100,6 +100,7 @@ class CRNN(nn.Module):
             input_size=512,
             hidden_size=nh,
             num_layers=2,
+            dropout=0.3,
             bidirectional=True,
             batch_first=False
         )

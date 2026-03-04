@@ -207,8 +207,8 @@ def train():
             # 4. Backward
             optimizer.zero_grad()
             loss.backward()
-            # 梯度裁剪，防止梯度爆炸
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            # 梯度裁剪，防止梯度爆炸  max_norm 由5降到2  比较稳定，常见推荐值
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
 
             # 🔍 梯度监控（每 N step 记录一次，防止 TB 太大）
             if global_step % 50 == 0:
