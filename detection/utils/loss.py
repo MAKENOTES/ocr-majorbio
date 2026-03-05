@@ -38,7 +38,7 @@ class EASTLoss(nn.Module):
     1. 分数图损失 (score_loss): 使用 Dice Loss 计算，用于区分文本和背景。
     2. 几何图损失 (geo_loss): 使用一个简化的 IoU 损失（基于L1距离）计算，用于回归边界框的位置。
     """
-    def __init__(self, lambda_iou=3.0):
+    def __init__(self, lambda_iou=5.0):
         """
         初始化 EAST 损失函数。
         :param lambda_iou: float, IoU 损失的权重。

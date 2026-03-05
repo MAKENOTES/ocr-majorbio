@@ -90,6 +90,17 @@ class GenerateGT:
         
         return sample
 
+
+class ColorJitterTransform:
+    def __init__(self):
+        self.jitter = transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)
+
+    def __call__(self, sample):
+        # 仅对图像进行颜色抖动，不改变 quads
+        # 需要在 ToTensor 和 ResizeAndPad 之前执行，或者确保数据格式兼容 PIL
+        sample['image'] = self.jitter(sample['image'])
+        return sample
+
 class ToTensor:
     def __init__(self):
         # ImageNet 的标准均值和方差
@@ -127,6 +138,7 @@ def get_transforms(is_train=True, input_size=512):
     # TODO: 为训练添加更多的数据增强 (例如，随机旋转、颜色抖动)
     if is_train:
         return transforms.Compose([
+            ColorJitterTransform(),
             ResizeAndPad(input_size),
             GenerateGT(input_size),
             ToTensor()

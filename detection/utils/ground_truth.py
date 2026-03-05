@@ -102,25 +102,17 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
         positive_pixels = np.argwhere(mask == 1)
 
         for y, x in positive_pixels:
-            # 使用像素中心对齐 (更精准)
             pixel_center_x = x + 0.5
             pixel_center_y = y + 0.5
+            dist_top = max(0, pixel_center_y - y_min)
+            dist_right = max(0, x_max - pixel_center_x)
+            dist_bottom = max(0, y_max - pixel_center_y)
+            dist_left = max(0, pixel_center_x - x_min)
 
-            dist_top = pixel_center_y - y_min
-            dist_right = x_max - pixel_center_x
-            dist_bottom = y_max - pixel_center_y
-            dist_left = pixel_center_x - x_min
+            new_area = (dist_top + dist_bottom) * (dist_left + dist_right)
+            old_area = (geo_map[0, y, x] + geo_map[2, y, x]) * (geo_map[1, y, x] + geo_map[3, y, x])
 
-            # 限制为非负
-            dist_top = max(0, dist_top)
-            dist_right = max(0, dist_right)
-            dist_bottom = max(0, dist_bottom)
-            dist_left = max(0, dist_left)
-
-            # 简单的 AABB 赋值逻辑 (因为没有旋转，不需要选最小面积的)
-            # 对于纯水平框，重叠区域通常选择"距离边缘最近"或者"保持最大"
-            # 简单起见，覆盖即可，或者取最大值（防止小框覆盖大框）
-            if geo_map[0, y, x] == 0:
+            if geo_map[0, y, x] == 0 or new_area < old_area:
                 geo_map[0, y, x] = dist_top
                 geo_map[1, y, x] = dist_right
                 geo_map[2, y, x] = dist_bottom

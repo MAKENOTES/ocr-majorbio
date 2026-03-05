@@ -18,6 +18,7 @@ if project_root not in sys.path:
 from recognition.converter import LabelConverter
 from recognition.dataset import create_dataloader
 from recognition.model import CRNN
+import Levenshtein
 
 # ================= 配置区域 =================
 # 1. 路径配置
@@ -33,14 +34,14 @@ NUM_CHANNELS = 1    # 1=灰度, 3=RGB
 
 # 3. 训练超参数
 BATCH_SIZE = 64     # 适当调整
-EPOCHS = 100
+EPOCHS = 120
 LEARNING_RATE = 3e-4
 NUM_WORKERS = 4
 
 # 4. 保存与验证策略
 SAVE_INTERVAL = 5        # 每隔多少轮强制保存一次
 START_VALID_EPOCH = 1    # 【建议】从第1轮就开始验证，以便 Scheduler 正常工作
-START_SAVE_EPOCH = 50    # 从第50轮才开始保存模型 (跳过前期不稳定阶段)
+START_SAVE_EPOCH = 50    # 从第30轮才开始保存模型 (跳过前期不稳定阶段)
 KEEP_TOP_K = 3           # 只保留 Loss 最小的 3 个最佳模型
 
 # 5. 硬件
@@ -56,6 +57,8 @@ def evaluate(model, dataloader, converter, criterion):
     total_samples = 0
     total_loss = 0.0
     batch_count = 0
+    total_char_distance = 0  # 新增
+    total_chars = 0  # 新增
 
     with torch.no_grad():
         for images, labels in tqdm(dataloader, desc="Validating", leave=False):
@@ -85,13 +88,18 @@ def evaluate(model, dataloader, converter, criterion):
             total_samples += len(labels)
             for pred, gt in zip(decoded_preds, labels):
                 # 移除首尾空白符进行对比
-                if pred.strip() == gt.strip():
+                p, g = pred.strip(), gt.strip()
+                if p == g:
                     correct_predictions += 1
+                # 计算编辑距离 (CER)
+                total_char_distance += Levenshtein.distance(p, g)
+                total_chars += len(g)
 
     avg_loss = total_loss / batch_count if batch_count > 0 else float('inf')
     accuracy = correct_predictions / total_samples if total_samples > 0 else 0.0
+    cer = total_char_distance / total_chars if total_chars > 0 else 1.0  # 新增
 
-    return accuracy, avg_loss
+    return accuracy, cer, avg_loss
 
 def log_gradient_norms(model, writer, global_step):
     total_norm = 0.0
@@ -142,7 +150,7 @@ def train():
 
     # 学习率调度器：监控 'min' 模式（Loss越小越好）
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-6
+        optimizer, mode='min', factor=0.5, patience=8, min_lr=1e-6
     )
 
     # 5. 数据加载器
@@ -236,13 +244,14 @@ def train():
         scheduler_metric = train_avg_loss
 
         if valid_loader and epoch >= START_VALID_EPOCH:
-            val_acc, val_loss = evaluate(model, valid_loader, converter, criterion)
+            val_acc, val_cer, val_loss = evaluate(model, valid_loader, converter, criterion)
 
-            print(f"Epoch {epoch} | Valid Acc: {val_acc:.4f} | Valid Loss: {val_loss:.4f}")
+            print(f"Epoch {epoch} | Valid Acc: {val_acc:.4f} | Valid CER: {val_cer:.4f} | Valid Loss: {val_loss:.4f}")
             writer.add_scalar('Validation/Accuracy', val_acc, epoch)
+            writer.add_scalar('Validation/CER', val_cer, epoch)
             writer.add_scalar('Validation/Loss', val_loss, epoch)
 
-            scheduler_metric = val_loss
+            scheduler_metric = val_cer
 
         # 更新学习率 (基于 Valid Loss 或 Train Loss)
         scheduler.step(scheduler_metric)
@@ -263,21 +272,21 @@ def train():
 
                 if len(best_checkpoints) < KEEP_TOP_K:
                     should_save_best = True
-                elif scheduler_metric < best_checkpoints[-1]['loss']:
+                elif scheduler_metric < best_checkpoints[-1]['metric']:
                     # 当前 Loss 小于列表中最差的一个
                     should_save_best = True
 
                 if should_save_best:
-                    best_name = f"{int(time.time())}best_loss_{scheduler_metric:.4f}_epoch_{epoch}.pth"
+                    best_name = f"{int(time.time())}best_cer_{scheduler_metric:.4f}_epoch_{epoch}.pth"
                     best_path = os.path.join(CHECKPOINT_DIR, best_name)
 
                     torch.save(model.state_dict(), best_path)
                     print(f"  [保存] 🌟 发现新最佳模型 ({scheduler_metric:.4f}) -> {best_path}")
 
                     # 更新列表
-                    best_checkpoints.append({'path': best_path, 'loss': scheduler_metric, 'epoch': epoch})
-                    # 按 Loss 从小到大排序
-                    best_checkpoints.sort(key=lambda x: x['loss'])
+                    best_checkpoints.append({'path': best_path, 'metric': scheduler_metric, 'epoch': epoch})
+                    # 按 metric 从小到大排序
+                    best_checkpoints.sort(key=lambda x: x['metric'])
 
                     # 移除多余的旧模型
                     if len(best_checkpoints) > KEEP_TOP_K:

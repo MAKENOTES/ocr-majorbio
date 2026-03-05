@@ -10,11 +10,12 @@ from utils.dataset import OCRDataset
 from utils.transforms import get_transforms
 from models.east_model import EASTModel
 from utils.loss import EASTLoss
+from torch.optim.lr_scheduler import OneCycleLR
 
 # --- 超参数 ---
-LEARNING_RATE =  1e-5  #1e-4 3e-5
+LEARNING_RATE =  1e-4  #1e-5 1e-4 3e-5
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
-EPOCHS = 1000
+EPOCHS = 500
 INPUT_SIZE = 1024
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"
@@ -25,7 +26,7 @@ VAL_LABEL_DIR = "detection/data/val_labels"
 MAX_KEEP_CHECKPOINTS = 10       # 常规检查点：保留最近的 5 个 (用于断点续训)
 BEST_MODELS_TO_KEEP = 3        # 最佳检查点：保留验证集 Loss 最低的 Top 3
 VAL_INTERVAL = 10              # 前期：每 10 个 epoch 验证一次
-START_DENSE_VAL_EPOCH = 980    # 策略切换点：从第 500 epoch 开始  每个 epoch 都验证 (忽略 VAL_INTERVAL)
+START_DENSE_VAL_EPOCH = 300    # 策略切换点：从第 500 epoch 开始  每个 epoch 都验证 (忽略 VAL_INTERVAL)
 
 def validate(model, val_loader, criterion, device, writer, epoch):
     """
@@ -147,9 +148,13 @@ def main():
 
     # --- 模型、损失函数和优化器 ---
     model = EASTModel(pretrained=True).to(device)
-    model.load_state_dict(torch.load("detection/checkpoints/best_detection_490_loss_0.0880.pth"))
+    # model.load_state_dict(torch.load("detection/checkpoints/best_detection_490_loss_0.0880.pth"))
     criterion = EASTLoss().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
+    # 学习率调度器
+    scheduler = OneCycleLR(optimizer, max_lr=3e-4,
+                           steps_per_epoch=len(train_loader),
+                           epochs=EPOCHS, pct_start=0.05)
 
     # 将模型图写入 TensorBoard (仅一次)
     if train_loader:
@@ -187,6 +192,7 @@ def main():
             #梯度裁剪
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
+            scheduler.step()  # 更新学习率
 
             loss_val, score_loss_val, geo_loss_val = loss.item(), score_loss.item(), geo_loss.item()
             # 记录每个 batch 的训练损失到 TensorBoard
@@ -205,11 +211,10 @@ def main():
         avg_loss = epoch_loss / len(train_loader)
         avg_score_loss = epoch_score_loss / len(train_loader)
         avg_geo_loss = epoch_geo_loss / len(train_loader)
-        print(f"Epoch {epoch} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f})")
-
         # 记录学习率
         current_lr = optimizer.param_groups[0]['lr']
         writer.add_scalar('Learning Rate', current_lr, epoch)
+        print(f"Epoch {epoch} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f}) Learning: {current_lr}")
 
         # --- 验证步骤 ---
         should_validate = False

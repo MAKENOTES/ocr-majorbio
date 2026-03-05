@@ -138,8 +138,8 @@ class BaseTextDataset(Dataset):
 
                 # 2️⃣ 轻微透视扰动
                 transforms.RandomPerspective(
-                    distortion_scale=0.2,
-                    p=0.5
+                    distortion_scale=0.1,
+                    p=0.3
                 ),
 
                 # 3️⃣ 颜色扰动
@@ -166,10 +166,10 @@ class BaseTextDataset(Dataset):
 
                 # 7️⃣ 随机擦除（必须在 ToTensor 之后）
                 transforms.RandomErasing(
-                    p=0.3,
-                    scale=(0.01, 0.05),
+                    p=0.18,
+                    scale=(0.02, 0.1),
                     ratio=(0.3, 3.3),
-                    value=0
+                    value='random'
                 ),
 
                 # 8️⃣ 归一化
