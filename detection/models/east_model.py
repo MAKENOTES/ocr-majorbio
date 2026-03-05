@@ -46,5 +46,6 @@ class EASTModel(nn.Module):
         y = self.fuse1(torch.cat([y, f1], dim=1))  # /4
 
         score = torch.sigmoid(self.score_conv(y))
-        geo = torch.relu(self.geo_conv(y))
+        # geo = torch.relu(self.geo_conv(y))
+        geo = self.geo_conv(y)  # 去掉 ReLU！log 空间的值可以是负数
         return score, geo

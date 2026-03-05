@@ -66,12 +66,25 @@ class EASTLoss(nn.Module):
         # y_true_geo 也是绝对像素真值 (N, 4, H, W)
         # 直接算，不需要 sigmoid * scale
 
-        geo_loss = self.iou_loss_real(y_pred_geo, y_true_geo, mask)
+        # geo_loss = self.iou_loss_real(y_pred_geo, y_true_geo, mask)
+        # 在 log 空间直接用 Smooth L1
+        geo_loss = self.smooth_l1_geo(y_pred_geo, y_true_geo, mask)
         
         # 总损失
         total_loss = score_loss + self.lambda_iou * geo_loss
         
         return total_loss, score_loss, geo_loss
+
+    def smooth_l1_geo(self, pred, target, mask):
+        eps = 1e-6
+        if mask.dim() == 4:
+            mask = mask.squeeze(1)
+        # 扩展 mask 到 4 通道
+        mask_4ch = mask.unsqueeze(1).expand_as(pred)
+
+        loss = nn.functional.smooth_l1_loss(pred * mask_4ch, target * mask_4ch, reduction='sum')
+        num_pos = torch.sum(mask) * 4 + eps  # 4个通道
+        return loss / num_pos
 
     def iou_loss(self, pred_aabb, true_aabb, mask):
         """

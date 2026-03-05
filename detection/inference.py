@@ -93,6 +93,10 @@ def detect(model, image_path, output_dir, input_size=1024, score_threshold=0.8, 
     score_map_np = score_map.cpu().numpy()
     geo_map_np = geo_map_data.cpu().numpy()
 
+    # 【新增】从 log 空间还原为真实像素距离
+    geo_map_np = np.expm1(geo_map_np)        # exp(x) - 1，是 log1p 的逆运算
+    geo_map_np = np.maximum(geo_map_np, 0)   # 确保非负
+
     # 3.1 阈值过滤
     xy_text = np.argwhere(score_map_np > score_threshold)
 

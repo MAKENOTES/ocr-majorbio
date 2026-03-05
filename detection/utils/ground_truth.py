@@ -118,4 +118,7 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
                 geo_map[2, y, x] = dist_bottom
                 geo_map[3, y, x] = dist_left
 
+    # 对 geo_map 做 log(1+x) 变换，压缩大距离值的范围
+    geo_map = np.log1p(geo_map)  # log(1+x)，x=0时结果为0，安全
+
     return score_map, geo_map
