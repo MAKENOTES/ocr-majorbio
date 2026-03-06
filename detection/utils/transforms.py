@@ -101,6 +101,63 @@ class ColorJitterTransform:
         sample['image'] = self.jitter(sample['image'])
         return sample
 
+
+class RandomScale:
+    """随机缩放图像，模拟不同距离拍摄的文档"""
+
+    def __init__(self, scale_range=(0.6, 1.4)):
+        self.scale_range = scale_range
+
+    def __call__(self, sample):
+        image, quads = sample['image'], sample['quads']
+        if quads.size == 0:
+            return sample
+
+        s = np.random.uniform(*self.scale_range)
+        w, h = image.size
+        new_w, new_h = int(w * s), int(h * s)
+
+        image = image.resize((new_w, new_h), Image.Resampling.BICUBIC)
+
+        if quads.size > 0:
+            quads = quads * s
+
+        sample['image'] = image
+        sample['quads'] = quads
+        return sample
+
+class RandomHorizontalCrop:
+    """随机水平裁剪，迫使模型学习不完整文本行的边界"""
+
+    def __init__(self, crop_ratio_range=(0.7, 1.0)):
+        self.crop_ratio_range = crop_ratio_range
+
+    def __call__(self, sample):
+        image, quads = sample['image'], sample['quads']
+
+        if np.random.random() > 0.5:  # 50% 概率执行
+            return sample
+
+        w, h = image.size
+        ratio = np.random.uniform(*self.crop_ratio_range)
+        new_w = int(w * ratio)
+        x_offset = np.random.randint(0, max(1, w - new_w))
+
+        image = image.crop((x_offset, 0, x_offset + new_w, h))
+
+        if quads.size > 0 and len(quads.shape) == 3:
+            quads[:, :, 0] -= x_offset
+            # 保留中心仍在裁剪区域内的框
+            centers_x = quads[:, :, 0].mean(axis=1)
+            keep = (centers_x > 0) & (centers_x < new_w)
+            quads = quads[keep]
+            if quads.size > 0:
+                quads[:, :, 0] = np.clip(quads[:, :, 0], 0, new_w)
+
+        sample['image'] = image
+        sample['quads'] = quads if quads.size > 0 else np.array([], dtype=np.float32)
+        return sample
+
 class ToTensor:
     def __init__(self):
         # ImageNet 的标准均值和方差
@@ -135,10 +192,12 @@ def get_transforms(is_train=True, input_size=512):
     :param input_size: int, 模型的输入尺寸。
     :return: 一个 `torchvision.transforms.Compose` 对象。
     """
-    # TODO: 为训练添加更多的数据增强 (例如，随机旋转、颜色抖动)
+    # 为训练添加更多的数据增强
     if is_train:
         return transforms.Compose([
             ColorJitterTransform(),
+            RandomScale(scale_range=(0.6, 1.4)),
+            RandomHorizontalCrop(crop_ratio_range=(0.7, 1.0)),
             ResizeAndPad(input_size),
             GenerateGT(input_size),
             ToTensor()

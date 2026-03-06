@@ -13,9 +13,9 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_detection_epoch_390_loss_0.11781.pth"
+MODEL_PATH = "detection/checkpoints/best_detection_epoch_473_loss_0.02607.pth"
 IMAGE_PATH = "detection/data/test/1"
-OUTPUT_DIR = "detection/data/test_results/2"
+OUTPUT_DIR = "detection/data/test_results/3"
 
 # 1. 裁剪保存开关
 SAVE_CROPS = True

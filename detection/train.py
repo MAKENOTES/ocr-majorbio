@@ -23,10 +23,10 @@ VAL_IMAGE_DIR = "detection/data/val_images"
 VAL_LABEL_DIR = "detection/data/val_labels"
 
 # --- 模型保存策略优化 ---
-MAX_KEEP_CHECKPOINTS = 10       # 常规检查点：保留最近的 5 个 (用于断点续训)
+MAX_KEEP_CHECKPOINTS = 20       # 常规检查点：保留最近的 5 个 (用于断点续训)
 BEST_MODELS_TO_KEEP = 3        # 最佳检查点：保留验证集 Loss 最低的 Top 3
 VAL_INTERVAL = 10              # 前期：每 10 个 epoch 验证一次
-START_DENSE_VAL_EPOCH = 300    # 策略切换点：从第 500 epoch 开始  每个 epoch 都验证 (忽略 VAL_INTERVAL)
+START_DENSE_VAL_EPOCH = 50    # 策略切换点：从第 500 epoch 开始  每个 epoch 都验证 (忽略 VAL_INTERVAL)
 
 def validate(model, val_loader, criterion, device, writer, epoch):
     """
