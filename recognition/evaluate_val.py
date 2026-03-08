@@ -15,7 +15,7 @@ from model import CRNN
 from dataset import InferenceDataset, dynamic_padding_collate_fn
 
 # ================= 配置区域 =================
-MODEL_PATH = "recognition/checkpoints/1772613572best_cer_0.0068_epoch_50.pth"  # 修改为你的最佳模型路径
+MODEL_PATH = "recognition/checkpoints/1772941672best_cer_0.0251_epoch_92.pth"  # 修改为你的最佳模型路径
 KEYS_PATH = "recognition/keys.txt"
 VAL_ANNOTATION = "recognition/data/train_annotation.txt"  # 验证集标注文件
 
@@ -87,7 +87,8 @@ def main():
                         num_workers=NUM_WORKERS, collate_fn=dynamic_padding_collate_fn)
 
     correct = 0
-    total_cer = 0.0
+    total_char_distance = 0   # 所有样本的编辑距离之和
+    total_chars = 0           # 所有样本的GT字符总数
     error_cases = []
 
     print("开始评估...")
@@ -105,22 +106,26 @@ def main():
                 pred = pred.strip()
                 gt = gt.strip()
 
-                if gt == pred:
+                # 字符级编辑距离（正确样本距离为0，自然参与累加）
+                char_dist = levenshtein_distance(gt, pred)
+                total_char_distance += char_dist
+                total_chars += max(len(gt), 1)
+
+                if char_dist == 0:
                     correct += 1
                 else:
-                    cer = levenshtein_distance(gt, pred) / max(len(gt), 1)
-                    total_cer += cer
+                    sample_cer = char_dist / max(len(gt), 1)
                     error_cases.append({
                         'filename': filename,
                         'gt': gt,
                         'pred': pred,
-                        'cer': cer
+                        'cer': sample_cer
                     })
 
     # 统计结果
     total = len(image_paths)
     accuracy = correct / total * 100
-    avg_cer = (total_cer / total) * 100
+    avg_cer = (total_char_distance / total_chars) * 100 if total_chars > 0 else 0.0
 
     print("\n" + "=" * 70)
     print("评估完成！")

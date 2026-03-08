@@ -34,14 +34,14 @@ NUM_CHANNELS = 1    # 1=灰度, 3=RGB
 
 # 3. 训练超参数
 BATCH_SIZE = 64     # 适当调整
-EPOCHS = 120
+EPOCHS = 300
 LEARNING_RATE = 3e-4
 NUM_WORKERS = 4
 
 # 4. 保存与验证策略
 SAVE_INTERVAL = 5        # 每隔多少轮强制保存一次
 START_VALID_EPOCH = 1    # 【建议】从第1轮就开始验证，以便 Scheduler 正常工作
-START_SAVE_EPOCH = 50    # 从第30轮才开始保存模型 (跳过前期不稳定阶段)
+START_SAVE_EPOCH = 50    # 从第50轮才开始保存模型 (跳过前期不稳定阶段)
 KEEP_TOP_K = 3           # 只保留 Loss 最小的 3 个最佳模型
 
 # 5. 硬件
@@ -253,7 +253,7 @@ def train():
 
             scheduler_metric = val_cer
 
-        # 更新学习率 (基于 Valid Loss 或 Train Loss)
+        # 更新学习率
         scheduler.step(scheduler_metric)
 
         # ================= 保存模型阶段 =================

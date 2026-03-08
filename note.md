@@ -15,6 +15,7 @@ pip install albumentations
 
 tensorboard
 tensorboard --logdir=detection/runs
+tensorboard --logdir=recognition/runs
 标注数据优化
 训练优化方案
     1、调整权重3--->2  学习率1e-5  epoch 至少1500+

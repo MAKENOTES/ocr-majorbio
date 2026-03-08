@@ -96,6 +96,9 @@ class CRNN(nn.Module):
 
         self.cnn = ResNetFeatureExtractor(input_channel=nc, output_channel=512)
 
+        # CNN → LSTM 之间加 Dropout，防止CNN特征过拟合传导到LSTM
+        self.cnn_dropout = nn.Dropout(p=0.3)
+
         self.rnn = nn.LSTM(
             input_size=512,
             hidden_size=nh,
@@ -104,6 +107,9 @@ class CRNN(nn.Module):
             bidirectional=True,
             batch_first=False
         )
+
+        # LSTM → Linear 之间也加 Dropout
+        self.rnn_dropout = nn.Dropout(p=0.3)
 
         self.embedding = nn.Linear(nh * 2, n_class)
         self._initialize_weights()
@@ -117,7 +123,10 @@ class CRNN(nn.Module):
         conv = conv.squeeze(2)  # [B, 512, W]
         conv = conv.permute(2, 0, 1)  # [W, B, 512]
 
+        conv = self.cnn_dropout(conv)  # CNN→LSTM 之间 Dropout
+
         rnn_out, _ = self.rnn(conv)
+        rnn_out = self.rnn_dropout(rnn_out)  # LSTM→Linear 之间 Dropout
         output = self.embedding(rnn_out)
 
         return F.log_softmax(output, dim=2)

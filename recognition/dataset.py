@@ -115,6 +115,81 @@ class AddGaussianNoise(object):
     def __repr__(self):
         return f"{self.__class__.__name__}(mean={self.mean}, std={self.std})"
 
+def remove_red_seal(image: Image.Image,
+                    sensitivity: float = 0.7,
+                    min_saturation: int = 50,
+                    min_value: int = 80) -> Image.Image:
+    """
+    从RGB图像中去除红色印章区域，用白色替换。
+
+    Args:
+        image: PIL RGB图像
+        sensitivity: 红色检测灵敏度 (0.0-1.0)，越高越激进
+                     0.5 = 保守 (只去除非常红的区域)
+                     0.7 = 推荐值
+                     0.9 = 激进 (可能误伤部分棕色/橙色文字)
+        min_saturation: 最小饱和度阈值 (0-255)，低于此值不认为是红色
+        min_value: 最小亮度阈值 (0-255)，低于此值不认为是红色
+
+    Returns:
+        去除红章后的PIL RGB图像
+    """
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    img_array = np.array(image)
+
+    # ========== 转HSV色彩空间 ==========
+    # PIL的HSV转换比较慢，这里手动用numpy实现
+    # 或者用简单的方式：用PIL转换
+    hsv_image = image.convert('HSV')
+    hsv_array = np.array(hsv_image)
+
+    h = hsv_array[:, :, 0]  # Hue: 0-255 (PIL的HSV, 0=0°, 255=360°)
+    s = hsv_array[:, :, 1]  # Saturation: 0-255
+    v = hsv_array[:, :, 2]  # Value: 0-255
+
+    # ========== 红色检测 ==========
+    # PIL的H值范围是 0-255，对应 0°-360°
+    # 红色在HSV中分两段:
+    #   H ≈ 0°-20° (对应PIL: 0-14)
+    #   H ≈ 340°-360° (对应PIL: 241-255)
+
+    # 根据sensitivity调整范围
+    # sensitivity=0.7 -> hue_range_low=0~18, hue_range_high=237~255
+    hue_expand = int(sensitivity * 6)  # 基准±扩展
+
+    low_hue_max = 12 + hue_expand  # 默认约18
+    high_hue_min = 243 - hue_expand  # 默认约237
+
+    # 调整饱和度阈值
+    sat_thresh = max(10, int(min_saturation * (1.2 - sensitivity * 0.4)))
+
+    # 红色mask: (低色相段 OR 高色相段) AND 足够饱和 AND 足够亮
+    red_mask = (
+            ((h <= low_hue_max) | (h >= high_hue_min)) &  # 色相在红色范围
+            (s >= sat_thresh) &  # 饱和度够高（排除灰白色）
+            (v >= min_value)  # 亮度够高（排除深黑色）
+    )
+
+    # ========== 形态学优化 (可选但推荐) ==========
+    # 轻微膨胀，填补印章内部的小空洞，让去除更干净
+    try:
+        from scipy import ndimage
+        # 膨胀2个像素，连接碎片
+        red_mask = ndimage.binary_dilation(red_mask, iterations=2)
+        # 闭运算，填充小洞
+        red_mask = ndimage.binary_closing(red_mask, iterations=1)
+    except ImportError:
+        # 没有scipy也能用，只是效果稍差
+        pass
+
+    # ========== 用白色替换红色区域 ==========
+    result = img_array.copy()
+    result[red_mask] = [255, 255, 255]
+
+    return Image.fromarray(result)
+
 class BaseTextDataset(Dataset):
     """
     文本识别数据集基类。
@@ -196,7 +271,7 @@ class BaseTextDataset(Dataset):
         try:
             # 1. 统一转为 RGB 读取
             image = Image.open(image_path).convert('RGB')
-
+            image = remove_red_seal(image)  # 在RGB阶段去红章
             # 2. 通道处理 (保留红章逻辑)
             if self.num_channels == 1:
                 image = image.convert('L')
