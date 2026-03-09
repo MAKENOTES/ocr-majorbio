@@ -219,9 +219,9 @@ class BaseTextDataset(Dataset):
 
                 # 3️⃣ 颜色扰动
                 transforms.ColorJitter(
-                    brightness=0.4,
-                    contrast=0.4,
-                    saturation=0.2
+                    brightness=0.2,
+                    contrast=0.2,
+                    saturation=0.1
                 ),
 
                 # 4️⃣ 转 tensor
@@ -276,13 +276,34 @@ class BaseTextDataset(Dataset):
             if self.num_channels == 1:
                 image = image.convert('L')
 
-            # 3. Resize (只固定高度，宽度按比例缩放)
+            # 3. Resize (固定高度，宽度按比例缩放，含两层保护)
             w, h = image.size
             target_h = self.img_height
             scale = target_h / h
             new_w = int(w * scale)
-            # 必须使用 LANCZOS 以保证缩小时的清晰度
+
+            # ---- 保护 A：高图宽度保护 ----
+            # 原图很高时（如 h=93），按高度缩放会把宽度压缩得太狠，
+            # 导致 CTC 时间步不足。此处保证缩放后宽度不低于原始宽度的 50%。
+            min_w_from_aspect = int(w * 0.5)
+            if new_w < min_w_from_aspect:
+                new_w = min(min_w_from_aspect, 800)  # 上限 800 防止显存爆炸
+
+            # 先 Resize 到目标尺寸
             image = image.resize((new_w, target_h), Image.Resampling.LANCZOS)
+
+            # ---- 保护 B：最小宽度保护 ----
+            # 小图（单字符、细线符号等）Resize 后宽度太窄，CNN 下采样后
+            # 特征几乎为零。将过窄的图片居中放置在白色画布上，不拉伸变形。
+            MIN_WIDTH = 48  # CNN 4x 下采样后至少 12 个时间步
+            if new_w < MIN_WIDTH:
+                if self.num_channels == 1:
+                    canvas = Image.new('L', (MIN_WIDTH, target_h), 255)
+                else:
+                    canvas = Image.new('RGB', (MIN_WIDTH, target_h), (255, 255, 255))
+                offset_x = (MIN_WIDTH - new_w) // 2
+                canvas.paste(image, (offset_x, 0))
+                image = canvas
 
             # 4. Apply Transforms
             image_tensor = self.transform(image)

@@ -34,7 +34,7 @@ NUM_CHANNELS = 1    # 1=灰度, 3=RGB
 
 # 3. 训练超参数
 BATCH_SIZE = 64     # 适当调整
-EPOCHS = 300
+EPOCHS = 500
 LEARNING_RATE = 3e-4
 NUM_WORKERS = 4
 
@@ -150,7 +150,7 @@ def train():
 
     # 学习率调度器：监控 'min' 模式（Loss越小越好）
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=8, min_lr=1e-6
+        optimizer, mode='min', factor=0.8, patience=20, min_lr=1e-6
     )
 
     # 5. 数据加载器

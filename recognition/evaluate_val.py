@@ -15,7 +15,7 @@ from model import CRNN
 from dataset import InferenceDataset, dynamic_padding_collate_fn
 
 # ================= 配置区域 =================
-MODEL_PATH = "recognition/checkpoints/1772941672best_cer_0.0251_epoch_92.pth"  # 修改为你的最佳模型路径
+MODEL_PATH = "recognition/checkpoints/1772993321best_cer_0.0049_epoch_186.pth"  # 修改为你的最佳模型路径
 KEYS_PATH = "recognition/keys.txt"
 VAL_ANNOTATION = "recognition/data/train_annotation.txt"  # 验证集标注文件
 
