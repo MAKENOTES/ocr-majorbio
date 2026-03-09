@@ -61,19 +61,20 @@ def evaluate(model, dataloader, converter, criterion):
     total_chars = 0  # 新增
 
     with torch.no_grad():
-        for images, labels in tqdm(dataloader, desc="Validating", leave=False):
+        for images, labels, img_widths in tqdm(dataloader, desc="Validating", leave=False):
             images = images.to(DEVICE)
+            img_widths = img_widths.to(DEVICE)
 
-            # 1. 前向传播
-            preds = model(images)  # Shape: [SeqLen, Batch, NumClasses]
+            # 1. 前向传播（传入真实宽度，mask padding 区域）
+            preds = model(images, img_widths=img_widths)  # Shape: [SeqLen, Batch, NumClasses]
 
             # 2. 计算验证 Loss (用于 Scheduler)
             text, length = converter.encode(labels)
             text = text.to(DEVICE)
             length = length.to(DEVICE)
 
-            # preds.size(0) 是时间步长度 (Sequence Length)
-            preds_size = torch.IntTensor([preds.size(0)] * images.size(0)).to(DEVICE)
+            # 用每张图片的真实宽度计算各自的时间步数（而非统一用最大值）
+            preds_size = (img_widths // 4).clamp(min=1).int()
 
             loss = criterion(preds, text, preds_size, length)
             # 处理 NaN 或 Inf
@@ -196,18 +197,20 @@ def train():
 
         pbar = tqdm(train_loader, desc=f"Epoch [{epoch}/{EPOCHS}]", unit="batch")
 
-        for i, (images, labels) in enumerate(pbar):
+        for i, (images, labels, img_widths) in enumerate(pbar):
             images = images.to(DEVICE)
+            img_widths = img_widths.to(DEVICE)
 
-            # 1. Forward
-            preds = model(images)  # [SeqLen, Batch, NumClasses]
+            # 1. Forward（传入真实宽度，mask padding 区域）
+            preds = model(images, img_widths=img_widths)  # [SeqLen, Batch, NumClasses]
 
             # 2. Encode Labels
             text, length = converter.encode(labels)
             text = text.to(DEVICE)
             length = length.to(DEVICE)
 
-            preds_size = torch.IntTensor([preds.size(0)] * images.size(0)).to(DEVICE)
+            # 用每张图片的真实宽度计算各自的时间步数
+            preds_size = (img_widths // 4).clamp(min=1).int()
 
             # 3. Compute Loss
             loss = criterion(preds, text, preds_size, length)

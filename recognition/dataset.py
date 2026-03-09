@@ -74,13 +74,21 @@ def dynamic_padding_collate_fn(batch):
     """
     自定义 collate_fn，实现按批次动态 Padding。
     支持训练模式 (img, label) 和 推理模式 (img, path)。
+
+    返回:
+        padded_imgs: [B, C, H, W_max] 填充后的图像张量
+        labels_or_paths: 标签或路径的元组
+        img_widths: [B] 每张图片 padding 前的真实宽度（像素），
+                    用于计算每个样本在 CNN 下采样后的真实时间步数，
+                    使 CTC Loss 和解码只关注有效区域，忽略 padding。
     """
     images, labels_or_paths = zip(*batch)
 
+    # 记录每张图片的真实宽度
+    img_widths = torch.IntTensor([img.shape[2] for img in images])
+
     # 找到当前 Batch 中最宽的宽度
-    max_width = 0
-    for img in images:
-        max_width = max(max_width, img.shape[2])
+    max_width = max(img_widths).item()
 
     # 宽度补齐到 8 的倍数
     max_width = ((max_width + 7) // 8) * 8
@@ -96,7 +104,7 @@ def dynamic_padding_collate_fn(batch):
         w = img.shape[2]
         padded_imgs[i, :, :, :w] = img
 
-    return padded_imgs, labels_or_paths
+    return padded_imgs, labels_or_paths, img_widths
 
 
 # ==========================================

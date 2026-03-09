@@ -15,7 +15,7 @@ from model import CRNN
 from dataset import InferenceDataset, dynamic_padding_collate_fn
 
 # ================= 配置区域 =================
-MODEL_PATH = "recognition/checkpoints/1772993321best_cer_0.0049_epoch_186.pth"  # 修改为你的最佳模型路径
+MODEL_PATH = "recognition/checkpoints/1773044236best_cer_0.0004_epoch_241.pth"  # 修改为你的最佳模型路径
 KEYS_PATH = "recognition/keys.txt"
 VAL_ANNOTATION = "recognition/data/train_annotation.txt"  # 验证集标注文件
 
@@ -94,9 +94,10 @@ def main():
     print("开始评估...")
 
     with torch.no_grad():
-        for images, paths in tqdm(loader):
+        for images, paths, img_widths in tqdm(loader):
             images = images.to(DEVICE)
-            preds = model(images)
+            img_widths = img_widths.to(DEVICE)
+            preds = model(images, img_widths=img_widths)
             pred_texts = converter.decode(preds.cpu())
 
             for path, pred in zip(paths, pred_texts):

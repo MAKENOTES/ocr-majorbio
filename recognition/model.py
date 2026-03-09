@@ -114,7 +114,16 @@ class CRNN(nn.Module):
         self.embedding = nn.Linear(nh * 2, n_class)
         self._initialize_weights()
 
-    def forward(self, input):
+    def forward(self, input, img_widths=None):
+        """
+        Args:
+            input: [B, C, 32, W] 图像张量（含 padding）
+            img_widths: [B] 每张图片 padding 前的真实像素宽度（可选）。
+                        提供时，会将 padding 区域的输出强制设为 blank，
+                        防止 CTC 在 padding 区域产生错误预测。
+        Returns:
+            output: [SeqLen, B, NumClasses] log_softmax 后的输出
+        """
         conv = self.cnn(input)
 
         b, c, h, w = conv.size()
@@ -127,7 +136,20 @@ class CRNN(nn.Module):
 
         rnn_out, _ = self.rnn(conv)
         rnn_out = self.rnn_dropout(rnn_out)  # LSTM→Linear 之间 Dropout
-        output = self.embedding(rnn_out)
+        output = self.embedding(rnn_out)  # [W, B, NumClasses]
+
+        # ---- Attention Mask: 将 padding 区域的 logits 强制设为 blank ----
+        if img_widths is not None:
+            seq_len = output.size(0)
+            # CNN 宽度下采样倍率为 4，计算每个样本的真实时间步数
+            real_seq_lens = (img_widths.to(output.device) // 4).clamp(min=1)
+            # 构建 mask: [SeqLen, Batch]，True 表示 padding 位置
+            time_indices = torch.arange(seq_len, device=output.device).unsqueeze(1)  # [W, 1]
+            padding_mask = time_indices >= real_seq_lens.unsqueeze(0)  # [W, B]
+            # padding 位置: blank(idx=0) 的 logit 设为大值，其余设为极小值
+            # 这样 softmax 后 padding 位置几乎 100% 输出 blank
+            output[padding_mask] = output.new_full((output.size(2),), -1e9)
+            output[padding_mask, 0] = 0.0  # blank 类别的 logit 设为 0（相对最大）
 
         return F.log_softmax(output, dim=2)
 
