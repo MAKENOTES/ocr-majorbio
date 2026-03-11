@@ -33,9 +33,9 @@ from models.east_model import EASTModel
 from utils.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_detection_epoch_473_loss_0.02607.pth"
+MODEL_PATH = "detection/checkpoints/best_detection_epoch_208_loss_0.01717.pth"
 IMAGE_PATH = "detection/data/test/1"
-OUTPUT_DIR = "detection/data/test_results/4"
+OUTPUT_DIR = "detection/data/test_results/1"
 
 SAVE_CROPS = True
 CROP_DIR_NAME = "detection/data/crops/20260131_v2"
@@ -44,7 +44,7 @@ EXPAND_BOX = True
 EXPAND_RATIO_W = 0.30   # 左右扩充 = 字高 * 0.3
 EXPAND_RATIO_H = 0.10   # 上下扩充 = 字高 * 0.1
 
-INPUT_SIZE = 1024
+INPUT_SIZE = 640
 SCORE_THRESHOLD = 0.7    # 可以比原来低一些，因为连通域方法更鲁棒
 MIN_AREA = 5             # 最小连通域面积（score map 像素数），过滤噪点
 

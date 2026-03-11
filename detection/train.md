@@ -26,3 +26,16 @@
        先1e-4 权重3--->1  得到小的score， 学习率：1e-5    lambda_iou：3   shrink：0.2   epoch：1700
        然后调追加训练 整权重3--->2  学习率1e-5  降低geo， 1e-5    lambda_iou：3   shrink：0.2   epoch：1700
     4、调整模型构建
+
+20260310   更换了resnet18  , 存在两个问题  出现两行文字一个框 （预估此问题需要重新训练）  另外 单字或单个符号 漏调 （新增v3推理改善很多）
+    已保存早停时的模型: detection/checkpoints/detection_epoch_248_early_stop.pth
+    ============================================================
+    训练因早停在 Epoch 248 结束
+    最佳模型: Epoch 208, Val Loss: 0.01717
+    Top-3 模型:
+      1. best_detection_epoch_208_loss_0.01717.pth (Loss: 0.01717)
+      2. best_detection_epoch_207_loss_0.01738.pth (Loss: 0.01738)
+      3. best_detection_epoch_240_loss_0.01782.pth (Loss: 0.01782)
+
+
+20260310
