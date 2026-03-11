@@ -27,7 +27,18 @@
        然后调追加训练 整权重3--->2  学习率1e-5  降低geo， 1e-5    lambda_iou：3   shrink：0.2   epoch：1700
     4、调整模型构建
 
-20260310   更换了resnet18  , 存在两个问题  出现两行文字一个框 （预估此问题需要重新训练）  另外 单字或单个符号 漏调 （新增v3推理改善很多）
+20260310   更换了resnet18 和 图片输入分辨率 640 ， 目的是为了提高在cpu上的推理速度
+    此次代码改动，主要调整四处，
+        第一个 新的模型文件，
+        第二个 新的推理文件，
+        第三个 图片分辨率1024到640  train文件 和 推理文件，
+        第四个 ground_truth.py shrunk_quad = shrink_polygon(scaled_quad, r=0.3)   0.2换成0.3  [让行间有更明确的间隔]
+
+    训练完成后，存在两个问题
+        出现两行文字一个框 （预估此问题需要重新训练）
+        单字或单个符号 漏调 （新增v3推理改善很多）
+
+
     已保存早停时的模型: detection/checkpoints/detection_epoch_248_early_stop.pth
     ============================================================
     训练因早停在 Epoch 248 结束
@@ -38,4 +49,4 @@
       3. best_detection_epoch_240_loss_0.01782.pth (Loss: 0.01782)
 
 
-20260310
+20260311   ground_truth.py shrunk_quad = shrink_polygon(scaled_quad, r=0.3)   0.2换成0.3   ， 解决出现两行文字一个框

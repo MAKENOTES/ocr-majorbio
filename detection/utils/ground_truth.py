@@ -90,7 +90,10 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
     for quad in quads:
         scaled_quad = quad * score_map_scale
 
-        shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
+        # 1024分辨率
+        # shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
+        # 改为：640分辨率下适当增大收缩率
+        shrunk_quad = shrink_polygon(scaled_quad, r=0.3)
 
         mask = np.zeros((score_map_h, score_map_w), dtype=np.uint8)
         cv2.fillPoly(mask, [shrunk_quad.astype(np.int32)], 1)
