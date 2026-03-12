@@ -49,6 +49,12 @@ Epoch 50 的 CER 达到了 0.0068 (0.68%)。  模型每识别 10,000 个字符�
 错误样本数     : 584
 
 
+20260312
+    问题：nncf 量化 后推理有问题   onnx  是可以的
+    000009-000005.jpg     甲甲方（盖章）：    实际应该是 甲方（盖章）：
+
+    已解决：nncf 量化 问题，recognition_quantize_nncf 中ignored_scope=nncf.IgnoredScope(types=["GRUSequence", "GroupConvolution"]),
+
 
 
 

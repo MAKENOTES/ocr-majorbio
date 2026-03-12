@@ -151,7 +151,7 @@ def quantize_with_nncf(onnx_path: str, output_dir: str,
         fast_bias_correction=False,
         # 高级选项: 如果精度不够，可以取消注释下面的 ignored_scope
         # 排除 GRU 层不量化 (GRU 对量化最敏感)
-        # ignored_scope=nncf.IgnoredScope(types=["GRU"]),
+        ignored_scope=nncf.IgnoredScope(types=["GRUSequence", "GroupConvolution"]),
     )
     quant_time = time.perf_counter() - t0
     print(f"  ✓ 量化完成 (耗时 {quant_time:.1f} 秒)")
@@ -254,7 +254,7 @@ def main():
                         default="recognition/data/val_images",
                         help="校准图像目录")
     parser.add_argument("--num_calib", type=int,
-                        default=300,
+                        default=500,
                         help="校准图像数量 (建议 200-500)")
     parser.add_argument("--subset_size", type=int,
                         default=300,

@@ -22,7 +22,7 @@ from recognition.components.dataset import InferenceDataset, dynamic_padding_col
 
 # ================= 配置区域 (常量) =================
 # 1. 核心路径
-MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/1773044236best_cer_0.0004_epoch_241.pth")  # 训练好的模型路径
+MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/1773288361best_cer_0.0012_epoch_461.pth")  # 训练好的模型路径
 KEYS_PATH = os.path.join(project_root, "recognition/keys.txt")  # 字典路径 (必须与训练一致)
 INPUT_PATH = os.path.join(project_root, "recognition/data/test_images")  # 待推理的图片文件夹 (或单张图片路径)
 OUTPUT_FILE = None  # 结果保存路径 (设为 None 则只打印)
