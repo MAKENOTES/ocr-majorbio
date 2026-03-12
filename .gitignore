@@ -13,7 +13,15 @@ detection/runs/
 recognition/data/
 recognition/runs/
 recognition/checkpoints/
+#优化的模型文件
+best_detection.onnx
+best_detection.onnx.data
+best_detection.pth
 
+best_recognition.onnx
+best_recognition.onnx.data
+best_recognition.pth
+best_recognition_nncf_int8.bin
 
 
 

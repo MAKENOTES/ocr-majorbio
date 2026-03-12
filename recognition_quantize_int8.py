@@ -28,7 +28,6 @@ import sys
 import argparse
 import numpy as np
 import time
-from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -53,7 +52,7 @@ def preprocess_image_for_calib(image_path: str, img_height: int = 32) -> np.ndar
 
     # 去红章（与训练时一致）
     try:
-        from recognition.dataset import remove_red_seal
+        from recognition.components.dataset import remove_red_seal
         img = remove_red_seal(img)
     except ImportError:
         pass
@@ -268,7 +267,7 @@ def main():
                         default="best_recognition.onnx",
                         help="输入 FP32 ONNX 模型路径")
     parser.add_argument("--mode", type=str, choices=["dynamic", "static"],
-                        default="dynamic",
+                        default="static",
                         help="量化模式：dynamic（快速）或 static（更精确，需要校准集）")
     parser.add_argument("--output_path", type=str,
                         default=None,
@@ -277,7 +276,7 @@ def main():
                         default="recognition/data/val_images",
                         help="静态量化的校准图像目录（仅 static 模式需要）")
     parser.add_argument("--num_calib", type=int,
-                        default=100,
+                        default=3000,
                         help="校准图像数量（建议 50-200 张）")
     parser.add_argument("--img_height", type=int,
                         default=32,

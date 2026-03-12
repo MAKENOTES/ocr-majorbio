@@ -6,10 +6,10 @@ import os
 import time
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.dataset import OCRDataset
-from utils.transforms import get_transforms
+from components.dataset import OCRDataset
+from components.transforms import get_transforms
 from models.east_model import EASTModel
-from utils.loss import EASTLoss
+from components.loss import EASTLoss
 from torch.optim.lr_scheduler import OneCycleLR
 
 # --- 超参数 ---

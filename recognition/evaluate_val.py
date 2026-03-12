@@ -10,12 +10,12 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from converter import LabelConverter
-from model import CRNN
-from dataset import InferenceDataset, dynamic_padding_collate_fn
+from recognition.components.converter import LabelConverter
+from recognition.models.model import CRNN
+from recognition.components.dataset import InferenceDataset, dynamic_padding_collate_fn
 
 # ================= 配置区域 =================
-MODEL_PATH = "recognition/checkpoints/1773044236best_cer_0.0004_epoch_241.pth"  # 修改为你的最佳模型路径
+MODEL_PATH = "recognition/checkpoints/1773288361best_cer_0.0012_epoch_461.pth"  # 修改为你的最佳模型路径
 KEYS_PATH = "recognition/keys.txt"
 VAL_ANNOTATION = "recognition/data/train_annotation.txt"  # 验证集标注文件
 

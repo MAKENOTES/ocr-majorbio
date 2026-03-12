@@ -14,7 +14,6 @@ recognition_export_onnx.py — 将训练好的 CRNN PyTorch 模型导出为 ONNX
 """
 
 import torch
-import argparse
 import os
 import numpy as np
 
@@ -22,8 +21,8 @@ import numpy as np
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recognition.model import CRNN
-from recognition.converter import LabelConverter
+from recognition.models.model import CRNN
+from recognition.components.converter import LabelConverter
 
 
 def export_onnx(model_path: str, output_path: str, keys_path: str,
@@ -81,6 +80,7 @@ def export_onnx(model_path: str, output_path: str, keys_path: str,
             "output": {0: "seq_len", 1: "batch_size"},
         },
         verbose=False,
+        dynamo=False, #GRU专用  ，resnet50  不需要
     )
     print(f"    ✓ 基础 ONNX 导出完成")
 

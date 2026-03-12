@@ -13,16 +13,16 @@ if project_root not in sys.path:
 
 # --- 导入项目模块 ---
 # converter: 用于字符解码
-from converter import LabelConverter
+from recognition.components.converter import LabelConverter
 # model: 定义网络结构
-from model import CRNN
+from recognition.models.model import CRNN
 # dataset: 复用其中的推理数据集类和动态Padding整理函数
 # 注意：前提是你已经按照上一步修改了 dataset.py
-from dataset import InferenceDataset, dynamic_padding_collate_fn
+from recognition.components.dataset import InferenceDataset, dynamic_padding_collate_fn
 
 # ================= 配置区域 (常量) =================
 # 1. 核心路径
-MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/1772613572best_cer_0.0068_epoch_50.pth")  # 训练好的模型路径
+MODEL_PATH = os.path.join(project_root, "recognition/checkpoints/1773044236best_cer_0.0004_epoch_241.pth")  # 训练好的模型路径
 KEYS_PATH = os.path.join(project_root, "recognition/keys.txt")  # 字典路径 (必须与训练一致)
 INPUT_PATH = os.path.join(project_root, "recognition/data/test_images")  # 待推理的图片文件夹 (或单张图片路径)
 OUTPUT_FILE = None  # 结果保存路径 (设为 None 则只打印)
@@ -119,11 +119,12 @@ def main():
 
     with torch.no_grad():
         # loader 返回: (padded_images, paths)
-        for images, paths in tqdm(loader, unit="batch"):
+        for images, paths, img_widths in tqdm(loader, unit="batch"):
             images = images.to(DEVICE)
+            img_widths = img_widths.to(DEVICE)
 
             # 前向传播 -> (SeqLen, Batch, NumClasses)
-            preds = model(images)
+            preds = model(images, img_widths=img_widths)
 
             # 解码 -> List[str]
             # converter.decode 内部处理了 Softmax/Argmax 和 CTC 的去重逻辑

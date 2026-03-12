@@ -15,9 +15,9 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 # ------------------------------------
 
-from recognition.converter import LabelConverter
-from recognition.dataset import create_dataloader
-from recognition.model import CRNN
+from recognition.components.converter import LabelConverter
+from recognition.components.dataset import create_dataloader
+from recognition.models.model import CRNN
 import Levenshtein
 
 # ================= 配置区域 =================

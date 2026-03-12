@@ -28,11 +28,10 @@
     4、调整模型构建
 
 20260310   更换了resnet18 和 图片输入分辨率 640 ， 目的是为了提高在cpu上的推理速度
-    此次代码改动，主要调整四处，
+    此次代码改动，主要调整三处，
         第一个 新的模型文件，
         第二个 新的推理文件，
         第三个 图片分辨率1024到640  train文件 和 推理文件，
-        第四个 ground_truth.py shrunk_quad = shrink_polygon(scaled_quad, r=0.3)   0.2换成0.3  [让行间有更明确的间隔]
 
     训练完成后，存在两个问题
         出现两行文字一个框 （预估此问题需要重新训练）
@@ -49,4 +48,26 @@
       3. best_detection_epoch_240_loss_0.01782.pth (Loss: 0.01782)
 
 
-20260311   ground_truth.py shrunk_quad = shrink_polygon(scaled_quad, r=0.3)   0.2换成0.3   ， 解决出现两行文字一个框
+20260311   ground_truth.py shrunk_quad = shrink_polygon(scaled_quad, r=0.3)   0.2换成0.3 让行间有更明确的间隔  ， 解决出现两行文字一个框
+    0.2换成0.3【shrink_polygon(scaled_quad, r=0.3) 】，并没有解决问题。 但是 训练没有早停止  而且 loss 降到了0.00831。
+    ============================================================
+    训练完成，共 500 个 Epoch
+    最佳模型: Epoch 475, Val Loss: 0.00831
+    Top-3 模型:
+    1. best_detection_epoch_475_loss_0.00831.pth (Loss: 0.00831)
+    2. best_detection_epoch_484_loss_0.00836.pth (Loss: 0.00836)
+    3. best_detection_epoch_500_loss_0.00836.pth (Loss: 0.00836)
+
+
+20260311  ground_truth 替换， （原来的文件备份给resnet50 ,命名为ground_truth_resnet50  并恢复缩放03成0.2），   目的是解决640分辨率下  两行文字一个框问题
+    替换后模型效果很差 无法使用  【待处理】
+
+    ============================================================
+    训练完成，共 500 个 Epoch
+    最佳模型: Epoch 492, Val Loss: 0.01948
+    Top-3 模型:
+      1. best_detection_epoch_492_loss_0.01948.pth (Loss: 0.01948)
+      2. best_detection_epoch_489_loss_0.01950.pth (Loss: 0.01950)
+      3. best_detection_epoch_494_loss_0.01951.pth (Loss: 0.01951)
+
+

@@ -30,7 +30,7 @@ from torchvision.transforms import Normalize
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.east_model import EASTModel
-from utils.transforms import ResizeAndPad
+from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
 MODEL_PATH = "detection/checkpoints/best_detection_epoch_208_loss_0.01717.pth"
