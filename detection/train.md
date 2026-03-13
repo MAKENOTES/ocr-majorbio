@@ -60,7 +60,7 @@
 
 
 20260311  ground_truth 替换， （原来的文件备份给resnet50 ,命名为ground_truth_resnet50  并恢复缩放03成0.2），   目的是解决640分辨率下  两行文字一个框问题
-    替换后模型效果很差 无法使用  【待处理】
+    结果：替换后模型效果很差 无法使用  TODO
 
     ============================================================
     训练完成，共 500 个 Epoch
@@ -70,4 +70,21 @@
       2. best_detection_epoch_489_loss_0.01950.pth (Loss: 0.01950)
       3. best_detection_epoch_494_loss_0.01951.pth (Loss: 0.01951)
 
+20260312   计划使用 moble模型架构, 目的优化速度
+    效果比resnet18 差一点，
+    ============================================================
+    ★ 早停触发！连续 40 次验证无改善
+      最佳 Val Loss: 0.02701 (Epoch 247)
+      当前 Val Loss: 0.04043 (Epoch 287)
+      建议使用 Epoch 247 的模型进行推理
+    ============================================================
 
+    已保存早停时的模型: detection/checkpoints/detection_epoch_287_early_stop.pth
+
+    ============================================================
+    训练因早停在 Epoch 287 结束
+    最佳模型: Epoch 247, Val Loss: 0.02701
+    Top-3 模型:
+      1. best_detection_epoch_247_loss_0.02701.pth (Loss: 0.02701)
+      2. best_detection_epoch_248_loss_0.02754.pth (Loss: 0.02754)
+      3. best_detection_epoch_235_loss_0.02756.pth (Loss: 0.02756)
