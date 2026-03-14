@@ -27,7 +27,7 @@ from components.transforms import ResizeAndPad
 # --- 配置参数 ---
 MODEL_PATH = "detection/checkpoints/best_detection_epoch_475_loss_0.00831_resnet18.pth"
 IMAGE_PATH = "detection/data/test/1"
-OUTPUT_DIR = "detection/data/test_results/5"
+OUTPUT_DIR = "detection/data/test_results/resnet18"
 
 SAVE_CROPS = True
 CROP_DIR_NAME = "detection/data/crops/20260131_v2"
