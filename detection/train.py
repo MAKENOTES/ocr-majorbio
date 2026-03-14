@@ -17,8 +17,8 @@ from torch.optim.lr_scheduler import OneCycleLR
 LEARNING_RATE = 5e-5
 # ★ 改动 2：增大 batch size（MobileNetV3 更轻量，显存允许更大 batch）
 BATCH_SIZE = 8
-EPOCHS = 500
-INPUT_SIZE = 640
+EPOCHS = 600
+INPUT_SIZE = 768
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"
 VAL_IMAGE_DIR = "detection/data/val_images"
@@ -178,10 +178,9 @@ def main():
 
     model = EASTModel(pretrained=True).to(device)
 
-    # ★ 改动 3：冻结骨干网络前几个 stage 的前 N 个 epoch
-    # MobileNetV3 的浅层特征（边缘、纹理）已经在 ImageNet 上学得很好
-    # 先冻结让 FPN 头部先适配，之后再解冻全部微调
-    FREEZE_BACKBONE_EPOCHS = 10
+    # ★ 改动 3：冻结骨干网络前几个 stage
+    # 延长到 25 个 epoch，让 FPN 头部 + 空洞卷积模块充分适配
+    FREEZE_BACKBONE_EPOCHS = 25
     for name, param in model.named_parameters():
         if name.startswith('stage0') or name.startswith('stage1'):
             param.requires_grad = False
@@ -214,10 +213,11 @@ def main():
             for name, param in model.named_parameters():
                 param.requires_grad = True
             # 重建优化器以包含所有参数
-            optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=5e-4)
+            # ★ 解冻后的 warmup 延长到 0.1，给新解冻的参数更多适应时间
+            optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-3)
             scheduler = OneCycleLR(optimizer, max_lr=2e-4,
                                    steps_per_epoch=len(train_loader),
-                                   epochs=EPOCHS - epoch + 1, pct_start=0.02)
+                                   epochs=EPOCHS - epoch + 1, pct_start=0.1)
 
         model.train()
         epoch_loss = 0

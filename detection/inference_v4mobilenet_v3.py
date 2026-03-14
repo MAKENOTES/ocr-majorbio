@@ -1,18 +1,14 @@
 """
-inference_v5_mobilenet.py — 改进版推理脚本 v5
+inference_v2.py — 改进版推理脚本 v3
 =======================================
-核心改动（基于诊断结果）：
-  诊断发现：
-    - score map 上相邻行有 0-1px 的极细粘连
-    - geo map 的 d_top + d_bottom 准确预测了单行高度（2-5px score map 尺度）
-    - 3x1 腐蚀太猛，会杀死正常的 1-2px 细行
+核心改动：用「连通域聚类 + 边界统计」替代「逐像素独立出框 + NMS」
 
-  解决方案：
-    ★ 对纵向过高的连通域，用 geo 预测的行高做「自适应水平切割」
-    - 不依赖投影谷值（粘连区域没有谷）
-    - 不依赖形态学腐蚀（会误杀正常行）
-    - 直接用 geo map 的 d_top + d_bottom 中位数作为步长，
-      从上到下等间隔切割，每段独立出框
+v3 修复说明（相对原始版本的改动）：
+  1. MIN_AREA 从 5 降到 2，修复 √ 等小符号漏检
+  2. 小连通域（面积 < SMALL_REGION_AREA）用全像素中位数出框，不用边缘采样
+  3. 宽高比过滤【仅对小连通域生效】，大连通域（正文长文本行）绝对不过滤
+     （正文行在 score map 上是扁长条，宽高比天然很大，不能用宽高比过滤）
+  4. 第二轮低阈值补充检测与第一轮完全隔离，凡与高阈值区域有像素重叠就跳过
 """
 
 import torch
@@ -29,27 +25,24 @@ from models.east_model import EASTModel
 from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_detection_epoch_247_loss_0.02701.pth"
+MODEL_PATH = "detection/checkpoints/best_detection_epoch_575_loss_0.01364_m.pth"
 IMAGE_PATH = "detection/data/test/1"
-OUTPUT_DIR = "detection/data/test_results/6"
+OUTPUT_DIR = "detection/data/test_results/5"
 
 SAVE_CROPS = True
-CROP_DIR_NAME = "detection/data/crops/20260313_v5"
+CROP_DIR_NAME = "detection/data/crops/20260131_v2"
 
 EXPAND_BOX = True
-EXPAND_RATIO_W = 0.30
-EXPAND_RATIO_H = 0.10
+EXPAND_RATIO_W = 0.30   # 左右扩充 = 字高 * 0.3
+EXPAND_RATIO_H = 0.10   # 上下扩充 = 字高 * 0.1
 
-INPUT_SIZE = 640
-SCORE_THRESHOLD       = 0.7
-SCORE_THRESHOLD_SMALL = 0.5
-MIN_AREA              = 2
-SMALL_REGION_AREA     = 15
-SMALL_MAX_ASPECT      = 5.0
-
-# ★ v5 行分割参数
-# 当连通域高度 > geo 预测行高的 N 倍时，触发切割
-ROW_SPLIT_HEIGHT_RATIO = 1.6
+INPUT_SIZE = 768
+SCORE_THRESHOLD       = 0.7   # 第一轮：正常文本行阈值
+SCORE_THRESHOLD_SMALL = 0.5   # 第二轮：小符号补充阈值，可调低到 0.4
+MIN_AREA              = 2     # 最小连通域面积（score map 像素数），从 5 降到 2
+SMALL_REGION_AREA     = 15    # 面积 < 此值视为小符号，走不同出框策略
+# 注意：宽高比过滤只用于小连通域噪点过滤，大连通域不受限制
+SMALL_MAX_ASPECT      = 5.0   # 小连通域宽高比超过此值才过滤（正方形符号宽高比应接近1）
 
 
 def load_model(model_path, device):
@@ -82,7 +75,11 @@ def preprocess_image(image_path, input_size):
 
 
 def box_from_small_region(ys, xs, geo_map_np, stride):
-    """针对小连通域的出框策略：全像素中位数。"""
+    """
+    针对小连通域（√ 等单字符/符号）的出框策略。
+    取所有像素 geo 预测的中位数，比边缘采样更稳定。
+    geo_map_np 此时已经过 expm1 还原，是真实像素距离。
+    """
     d_top    = np.median(geo_map_np[0, ys, xs])
     d_right  = np.median(geo_map_np[1, ys, xs])
     d_bottom = np.median(geo_map_np[2, ys, xs])
@@ -100,99 +97,26 @@ def box_from_small_region(ys, xs, geo_map_np, stride):
     return box
 
 
-def box_from_edge_sampling(ys, xs, geo_map_np, stride):
-    """大连通域的边缘采样出框。"""
-    x_min_r = xs.min();  x_max_r = xs.max()
-    y_min_r = ys.min();  y_max_r = ys.max()
-    rw = x_max_r - x_min_r + 1
-    rh = y_max_r - y_min_r + 1
-
-    edge_w = max(1, min(5, int(rw * 0.1)))
-    edge_h = max(1, min(3, int(rh * 0.1)))
-
-    lm = (xs >= x_min_r) & (xs < x_min_r + edge_w)
-    x_min_final = np.median(xs[lm] + 0.5 - geo_map_np[3, ys[lm], xs[lm]]) if lm.sum() > 0 else float(x_min_r)
-
-    rm = (xs > x_max_r - edge_w) & (xs <= x_max_r)
-    x_max_final = np.median(xs[rm] + 0.5 + geo_map_np[1, ys[rm], xs[rm]]) if rm.sum() > 0 else float(x_max_r + 1)
-
-    tm = (ys >= y_min_r) & (ys < y_min_r + edge_h)
-    y_min_final = np.median(ys[tm] + 0.5 - geo_map_np[0, ys[tm], xs[tm]]) if tm.sum() > 0 else float(y_min_r)
-
-    bm = (ys > y_max_r - edge_h) & (ys <= y_max_r)
-    y_max_final = np.median(ys[bm] + 0.5 + geo_map_np[2, ys[bm], xs[bm]]) if bm.sum() > 0 else float(y_max_r + 1)
-
-    box = [x_min_final * stride, y_min_final * stride,
-           x_max_final * stride, y_max_final * stride]
-    return box
-
-
-def geo_guided_row_split(ys, xs, geo_map_np, stride):
-    """
-    ★ v5 核心函数：基于 geo map 的行高信息做自适应行切割。
-
-    原理：
-    1. 计算连通域内 geo 预测的中位行高 (d_top + d_bottom 的中位数)
-    2. 如果连通域实际高度 > 行高 * 1.6，说明多行粘连
-    3. 从连通域顶部开始，以行高为步长，逐行切割
-    4. 每个切割段内的像素独立用边缘采样出框
-
-    为什么这样做有效：
-    - 诊断发现 geo map 的 d_top/d_bottom 是准确的（即使 score map 粘连）
-    - 不需要投影谷值（粘连区域投影是满的，没有谷）
-    - 不需要形态学操作（腐蚀会杀死正常细行）
-    """
-    y_min_r = ys.min()
-    y_max_r = ys.max()
-    cc_height = y_max_r - y_min_r + 1
-
-    # 计算 geo 预测的中位行高（score map 尺度）
-    row_heights = geo_map_np[0, ys, xs] + geo_map_np[2, ys, xs]
-    median_row_h = np.median(row_heights)
-
-    # 行高太小（< 1px）或连通域不够高，不需要分割
-    if median_row_h < 1.0 or cc_height < median_row_h * ROW_SPLIT_HEIGHT_RATIO:
-        return None
-
-    # 估计行数（向上取整）
-    est_num_rows = max(2, round(cc_height / median_row_h))
-
-    # 计算切割步长
-    step = cc_height / est_num_rows
-
-    boxes = []
-    for row_idx in range(est_num_rows):
-        seg_y_lo = y_min_r + row_idx * step
-        seg_y_hi = y_min_r + (row_idx + 1) * step
-
-        # 选出落在这个 Y 区间内的像素
-        mask_seg = (ys >= seg_y_lo) & (ys < seg_y_hi)
-        seg_ys = ys[mask_seg]
-        seg_xs = xs[mask_seg]
-
-        if len(seg_ys) < 2:
-            continue
-
-        # 对每个子行用边缘采样出框
-        box = box_from_edge_sampling(seg_ys, seg_xs, geo_map_np, stride)
-        if box[2] - box[0] > 2 and box[3] - box[1] > 2:
-            boxes.append(box)
-
-    if len(boxes) >= 2:
-        return boxes
-    return None
-
-
 def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
                                      score_threshold_small, min_area):
     """
-    两轮连通域检测 + geo 引导的行分割。
+    两轮完全独立的连通域检测：
+
+    第一轮（高阈值）：处理所有正常文本连通域
+      - 大连通域（面积 >= SMALL_REGION_AREA）：边缘像素采样，精度高
+        ★ 不做宽高比过滤，正文长文本行天然是扁长条
+      - 小连通域（面积 < SMALL_REGION_AREA） ：全像素中位数出框
+        ★ 对小连通域做宽高比过滤，去除细线噪点
+
+    第二轮（低阈值，仅补充）：捡回漏掉的弱激活小符号
+      - 凡与高阈值区域有任何像素重叠的连通域直接跳过
+      - 只处理完全游离在高阈值区域之外的小连通域
     """
     stride = 4.0
     boxes = []
 
     # ════════════════════════════════════════════════════════
-    # 第一轮：高阈值
+    # 第一轮：高阈值，完整处理所有连通域
     # ════════════════════════════════════════════════════════
     binary_high = (score_map_np > score_threshold).astype(np.uint8)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
@@ -206,8 +130,10 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
         ys, xs = np.where(labels == label_id)
 
-        # ── 小连通域 ──
+        # ── 小连通域（单符号）──────────────────────────────
         if area < SMALL_REGION_AREA:
+            # 小连通域才做宽高比过滤（去除细线噪点）
+            # √ 等符号宽高比接近 1，细线噪点宽高比极大
             w_cc = stats[label_id, cv2.CC_STAT_WIDTH]
             h_cc = stats[label_id, cv2.CC_STAT_HEIGHT]
             if max(w_cc, h_cc) / (min(w_cc, h_cc) + 1e-6) > SMALL_MAX_ASPECT:
@@ -217,20 +143,36 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
                 boxes.append(box)
             continue
 
-        # ── 大连通域 ──
-        # ★ 先尝试 geo 引导的行分割
-        split_boxes = geo_guided_row_split(ys, xs, geo_map_np, stride)
-        if split_boxes is not None:
-            boxes.extend(split_boxes)
-            continue
+        # ── 大连通域（文本行）：边缘像素采样出框 ────────────
+        # ★ 不加宽高比过滤，正文长文本行宽高比本来就大
+        x_min_r = xs.min();  x_max_r = xs.max()
+        y_min_r = ys.min();  y_max_r = ys.max()
+        rw = x_max_r - x_min_r + 1
+        rh = y_max_r - y_min_r + 1
 
-        # 无法分割，正常边缘采样出框
-        box = box_from_edge_sampling(ys, xs, geo_map_np, stride)
+        edge_w = max(1, min(5, int(rw * 0.1)))
+        edge_h = max(1, min(3, int(rh * 0.1)))
+
+        lm = (xs >= x_min_r) & (xs < x_min_r + edge_w)
+        x_min_final = np.median(xs[lm] + 0.5 - geo_map_np[3, ys[lm], xs[lm]]) if lm.sum() > 0 else float(x_min_r)
+
+        rm = (xs > x_max_r - edge_w) & (xs <= x_max_r)
+        x_max_final = np.median(xs[rm] + 0.5 + geo_map_np[1, ys[rm], xs[rm]]) if rm.sum() > 0 else float(x_max_r + 1)
+
+        tm = (ys >= y_min_r) & (ys < y_min_r + edge_h)
+        y_min_final = np.median(ys[tm] + 0.5 - geo_map_np[0, ys[tm], xs[tm]]) if tm.sum() > 0 else float(y_min_r)
+
+        bm = (ys > y_max_r - edge_h) & (ys <= y_max_r)
+        y_max_final = np.median(ys[bm] + 0.5 + geo_map_np[2, ys[bm], xs[bm]]) if bm.sum() > 0 else float(y_max_r + 1)
+
+        box = [x_min_final * stride, y_min_final * stride,
+               x_max_final * stride, y_max_final * stride]
         if box[2] - box[0] > 2 and box[3] - box[1] > 2:
             boxes.append(box)
 
     # ════════════════════════════════════════════════════════
-    # 第二轮：低阈值补充
+    # 第二轮：低阈值，仅补充捡回弱激活小符号
+    # 凡与高阈值区域有任何像素重叠，直接跳过
     # ════════════════════════════════════════════════════════
     if score_threshold_small < score_threshold:
         binary_low = (score_map_np > score_threshold_small).astype(np.uint8)
@@ -240,6 +182,7 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
         for label_id in range(1, num_labels_s):
             area = stats_s[label_id, cv2.CC_STAT_AREA]
+            # 只捡回小面积连通域
             if area < min_area or area >= SMALL_REGION_AREA:
                 continue
 
@@ -250,6 +193,7 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
             ys, xs = np.where(labels_s == label_id)
 
+            # 与高阈值区域有任何重叠就跳过，第一轮已处理
             if binary_high[ys, xs].any():
                 continue
 
@@ -276,7 +220,7 @@ def detect(model, image_path, output_dir, input_size=640, score_threshold=0.7,
     score_map_np = score_map[0, 0].cpu().numpy()
     geo_map_np   = geo_map[0, :4, :, :].cpu().numpy()
 
-    # 从 log 空间还原
+    # 从 log 空间还原为真实像素距离
     geo_map_np = np.expm1(geo_map_np)
     geo_map_np = np.maximum(geo_map_np, 0)
 
@@ -298,7 +242,7 @@ def detect(model, image_path, output_dir, input_size=640, score_threshold=0.7,
     filename_full   = os.path.basename(image_path)
     filename_no_ext = os.path.splitext(filename_full)[0]
 
-    # 坐标映射
+    # 坐标映射参数（输入图 → 原图）
     scale             = input_size / max(orig_h, orig_w)
     current_content_w = int(orig_w * scale)
     current_content_h = int(orig_h * scale)
@@ -324,6 +268,7 @@ def detect(model, image_path, output_dir, input_size=640, score_threshold=0.7,
                 y_min -= dy
                 y_max += dy
 
+            # 映射回原图坐标
             real_x_min = max(0,      int((x_min - pad_x) / scale))
             real_y_min = max(0,      int((y_min - pad_y) / scale))
             real_x_max = min(real_w, int((x_max - pad_x) / scale))
@@ -360,10 +305,11 @@ def main():
     print(f"使用设备: {device}")
     print("-" * 30)
     print(f"模型路径:       {MODEL_PATH}")
-    print(f"推理模式:       两轮连通域 + geo引导行分割 (v5)")
-    print(f"第一轮阈值:     {SCORE_THRESHOLD}")
-    print(f"第二轮阈值:     {SCORE_THRESHOLD_SMALL}")
-    print(f"分割触发比例:   连通域高度 > geo行高 × {ROW_SPLIT_HEIGHT_RATIO}")
+    print(f"推理模式:       两轮独立连通域检测 (v3)")
+    print(f"第一轮阈值:     {SCORE_THRESHOLD}（所有文本行，不限宽高比）")
+    print(f"第二轮阈值:     {SCORE_THRESHOLD_SMALL}（弱激活小符号补充）")
+    print(f"最小面积:       {MIN_AREA} px")
+    print(f"小符号面积上限: {SMALL_REGION_AREA} px")
     print("-" * 30)
 
     if not os.path.exists(MODEL_PATH):

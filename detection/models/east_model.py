@@ -15,6 +15,9 @@ class EASTModel(nn.Module):
         features[13:17] -> /32, 960ch  (对应 f4，含最后的 1x1 conv 扩展)
 
     FPN 自顶向下合并后输出 /4 特征图，接 score + geo 预测头。
+
+    ★ 改进：在 FPN 输出后增加空洞卷积上下文模块，弥补 MobileNetV3 感受野不足，
+      帮助模型更好地区分相邻文本行。
     """
 
     def __init__(self, pretrained=True):
@@ -63,6 +66,22 @@ class EASTModel(nn.Module):
         )
 
         # ═══════════════════════════════════════════════════
+        # ★ 新增：空洞卷积上下文模块
+        # 用不同 dilation rate 捕获多尺度上下文，扩大有效感受野
+        # 帮助模型感知行间距，避免相邻行合并
+        # ═══════════════════════════════════════════════════
+        self.context = nn.Sequential(
+            # dilation=2: 感受野扩大，捕获行级上下文
+            nn.Conv2d(24, 24, 3, padding=2, dilation=2),
+            nn.BatchNorm2d(24),
+            nn.ReLU(inplace=True),
+            # dilation=4: 更大范围上下文，帮助区分段落/行
+            nn.Conv2d(24, 24, 3, padding=4, dilation=4),
+            nn.BatchNorm2d(24),
+            nn.ReLU(inplace=True),
+        )
+
+        # ═══════════════════════════════════════════════════
         # 输出头：score map + geometry map（在 /4 分辨率上）
         # ═══════════════════════════════════════════════════
         self.score_conv = nn.Conv2d(24, 1, kernel_size=1)
@@ -83,6 +102,9 @@ class EASTModel(nn.Module):
         y = self.fuse2(torch.cat([y, f2], dim=1))  # cat→80ch  → 32ch
         y = self.up2(y)                            # /4,  24ch
         y = self.fuse1(torch.cat([y, f1], dim=1))  # cat→48ch  → 24ch
+
+        # ★ 空洞卷积上下文增强（残差连接，保留原始细节）
+        y = y + self.context(y)
 
         # 输出预测
         score = torch.sigmoid(self.score_conv(y))  # (N, 1, H/4, W/4)
