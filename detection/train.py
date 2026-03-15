@@ -34,6 +34,12 @@ START_DENSE_VAL_EPOCH = 50
 EARLY_STOP_PATIENCE = 40
 EARLY_STOP_MIN_DELTA = 1e-5
 
+# ★ 改动：最佳模型保存标准
+# 由于验证集是从训练集中抽取的，val_loss 与 train_loss 高度相关，
+# 用 val_loss 选模型容易产生"虚假信心"——模型只是记住了这些样本。
+# 改为用 train_loss 作为保存标准，反映模型对全部训练数据的拟合程度。
+SAVE_BEST_BY = "train"  # "train" 或 "val"
+
 
 class EarlyStopping:
     """早停机制"""
@@ -47,16 +53,19 @@ class EarlyStopping:
         self.gap_history = []
 
     def __call__(self, val_loss, train_loss, epoch):
+        # ★ 改动：用 train_loss 驱动早停判断
+        # 因为 val 来自 train，val_loss 不具备独立泛化评估能力
+        monitor_loss = train_loss if SAVE_BEST_BY == "train" else val_loss
         gap = val_loss - train_loss
         self.gap_history.append(gap)
 
         if self.best_loss is None:
-            self.best_loss = val_loss
+            self.best_loss = monitor_loss
             self.best_epoch = epoch
             return False
 
-        if val_loss < self.best_loss - self.min_delta:
-            self.best_loss = val_loss
+        if monitor_loss < self.best_loss - self.min_delta:
+            self.best_loss = monitor_loss
             self.best_epoch = epoch
             self.counter = 0
         else:
@@ -64,9 +73,9 @@ class EarlyStopping:
             if self.counter >= self.patience:
                 self.should_stop = True
                 print(f"\n{'='*60}")
-                print(f"★ 早停触发！连续 {self.counter} 次验证无改善")
-                print(f"  最佳 Val Loss: {self.best_loss:.5f} (Epoch {self.best_epoch})")
-                print(f"  当前 Val Loss: {val_loss:.5f} (Epoch {epoch})")
+                print(f"★ 早停触发！连续 {self.counter} 次无改善 (监控: {SAVE_BEST_BY}_loss)")
+                print(f"  最佳 {SAVE_BEST_BY} Loss: {self.best_loss:.5f} (Epoch {self.best_epoch})")
+                print(f"  当前 {SAVE_BEST_BY} Loss: {monitor_loss:.5f} (Epoch {epoch})")
                 print(f"{'='*60}\n")
                 return True
 
@@ -82,7 +91,8 @@ class EarlyStopping:
         return False
 
     def status(self):
-        return f"[EarlyStopping] 耐心: {self.counter}/{self.patience}, 最佳: {self.best_loss:.5f} @ Epoch {self.best_epoch}"
+        return (f"[EarlyStopping] 耐心: {self.counter}/{self.patience}, "
+                f"最佳 {SAVE_BEST_BY}: {self.best_loss:.5f} @ Epoch {self.best_epoch}")
 
 
 def validate(model, val_loader, criterion, device, writer, epoch):
@@ -134,16 +144,20 @@ def validate(model, val_loader, criterion, device, writer, epoch):
     return avg_loss, avg_score_loss, avg_geo_loss
 
 
-def save_best_checkpoint(model, epoch, val_loss, best_checkpoints_list):
+def save_best_checkpoint(model, epoch, loss_value, best_checkpoints_list, loss_type="train"):
+    """
+    保存最佳模型检查点。
+    :param loss_type: "train" 或 "val"，标识保存时使用的 loss 类型
+    """
     checkpoint_dir = "detection/checkpoints/"
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
-    file_name = f"best_detection_epoch_{epoch}_loss_{val_loss:.5f}.pth"
+    file_name = f"best_detection_epoch_{epoch}_{loss_type}_loss_{loss_value:.5f}.pth"
     save_path = os.path.join(checkpoint_dir, file_name)
     torch.save(model.state_dict(), save_path)
 
-    best_checkpoints_list.append((val_loss, save_path))
+    best_checkpoints_list.append((loss_value, save_path))
     best_checkpoints_list.sort(key=lambda x: x[0])
 
     if len(best_checkpoints_list) > BEST_MODELS_TO_KEEP:
@@ -153,12 +167,14 @@ def save_best_checkpoint(model, epoch, val_loss, best_checkpoints_list):
             os.remove(worst_path)
             print(f"移除旧的 Top-{BEST_MODELS_TO_KEEP + 1} 模型: {os.path.basename(worst_path)}")
 
-    print(f"★ 当前 Top-{BEST_MODELS_TO_KEEP} 模型已更新 (本轮 Loss: {val_loss:.5f})")
+    print(f"★ 当前 Top-{BEST_MODELS_TO_KEEP} 模型已更新 "
+          f"(本轮 {loss_type} Loss: {loss_value:.5f})")
 
 def main():
     log_dir = f"detection/runs/ocr_experiment_{int(time.time())}"
     writer = SummaryWriter(log_dir)
     print(f"TensorBoard 日志将保存在: {log_dir}")
+    print(f"★ 最佳模型保存标准: {SAVE_BEST_BY}_loss")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
@@ -264,6 +280,11 @@ def main():
         writer.add_scalar('Learning Rate', current_lr, epoch)
         print(f"Epoch {epoch} 训练结束: Loss: {avg_loss:.4f} (Score: {avg_score_loss:.4f}, Geo: {avg_geo_loss:.4f}) Learning: {current_lr}")
 
+        # ★ 改动：每个 epoch 都用 train_loss 尝试更新最佳模型
+        if SAVE_BEST_BY == "train":
+            if len(best_checkpoints) < BEST_MODELS_TO_KEEP or avg_loss < best_checkpoints[-1][0]:
+                save_best_checkpoint(model, epoch, avg_loss, best_checkpoints, loss_type="train")
+
         should_validate = False
         if epoch >= START_DENSE_VAL_EPOCH:
             should_validate = True
@@ -277,9 +298,12 @@ def main():
             writer.add_scalars('epoch/score Loss', {'train': avg_score_loss, 'validation': val_score}, epoch)
             writer.add_scalars('epoch/geo Loss', {'train': avg_geo_loss, 'validation': val_geo}, epoch)
 
-            if len(best_checkpoints) < BEST_MODELS_TO_KEEP or val_loss < best_checkpoints[-1][0]:
-                save_best_checkpoint(model, epoch, val_loss, best_checkpoints)
+            # ★ 如果用 val_loss 保存，走原逻辑
+            if SAVE_BEST_BY == "val":
+                if len(best_checkpoints) < BEST_MODELS_TO_KEEP or val_loss < best_checkpoints[-1][0]:
+                    save_best_checkpoint(model, epoch, val_loss, best_checkpoints, loss_type="val")
 
+            # 早停仍然运行（内部根据 SAVE_BEST_BY 选择监控哪个 loss）
             if early_stopping(val_loss, avg_loss, epoch):
                 checkpoint_dir = "detection/checkpoints/"
                 final_path = os.path.join(checkpoint_dir, f"detection_epoch_{epoch}_early_stop.pth")
@@ -290,6 +314,14 @@ def main():
             print(f"  {early_stopping.status()}")
         else:
             writer.add_scalars('epoch/loss_train', {'train': avg_loss}, epoch)
+            # ★ 无验证时也用 train_loss 驱动早停（传 train_loss 作为两个参数）
+            if SAVE_BEST_BY == "train" and epoch >= START_DENSE_VAL_EPOCH:
+                if early_stopping(avg_loss, avg_loss, epoch):
+                    checkpoint_dir = "detection/checkpoints/"
+                    final_path = os.path.join(checkpoint_dir, f"detection_epoch_{epoch}_early_stop.pth")
+                    torch.save(model.state_dict(), final_path)
+                    print(f"已保存早停时的模型: {final_path}")
+                    break
 
         checkpoint_dir = "detection/checkpoints/"
         if not os.path.exists(checkpoint_dir): os.makedirs(checkpoint_dir)
@@ -306,7 +338,7 @@ def main():
         print(f"训练因早停在 Epoch {epoch} 结束")
     else:
         print(f"训练完成，共 {EPOCHS} 个 Epoch")
-    print(f"最佳模型: Epoch {early_stopping.best_epoch}, Val Loss: {early_stopping.best_loss:.5f}")
+    print(f"最佳模型 ({SAVE_BEST_BY}_loss): Epoch {early_stopping.best_epoch}, Loss: {early_stopping.best_loss:.5f}")
     if best_checkpoints:
         print(f"Top-{BEST_MODELS_TO_KEEP} 模型:")
         for i, (loss, path) in enumerate(best_checkpoints):
