@@ -17,8 +17,8 @@ from torch.optim.lr_scheduler import OneCycleLR
 LEARNING_RATE = 5e-5
 # ★ 改动 2：增大 batch size（MobileNetV3 更轻量，显存允许更大 batch）
 BATCH_SIZE = 8
-EPOCHS = 600
-INPUT_SIZE = 768
+EPOCHS = 680
+INPUT_SIZE = 1024
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"
 VAL_IMAGE_DIR = "detection/data/val_images"

@@ -25,7 +25,7 @@ from models.east_model import EASTModel
 from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_detection_epoch_575_loss_0.01364_m.pth"
+MODEL_PATH = "detection/checkpoints/detection_epoch_641.pth"
 IMAGE_PATH = "detection/data/test/1"
 OUTPUT_DIR = "detection/data/test_results/mobilenet"
 
@@ -36,7 +36,7 @@ EXPAND_BOX = True
 EXPAND_RATIO_W = 0.30   # 左右扩充 = 字高 * 0.3
 EXPAND_RATIO_H = 0.10   # 上下扩充 = 字高 * 0.1
 
-INPUT_SIZE = 768
+INPUT_SIZE = 1024
 SCORE_THRESHOLD       = 0.7   # 第一轮：正常文本行阈值
 SCORE_THRESHOLD_SMALL = 0.5   # 第二轮：小符号补充阈值，可调低到 0.4
 MIN_AREA              = 2     # 最小连通域面积（score map 像素数），从 5 降到 2

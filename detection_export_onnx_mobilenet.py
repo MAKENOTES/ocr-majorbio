@@ -1,7 +1,7 @@
 """
 export_onnx.py — 将训练好的 EAST PyTorch 模型导出为 ONNX 格式
 =====================================================================
-适配 MobileNetV3-Large 骨干网络，默认输入分辨率 768
+适配 MobileNetV3-Large 骨干网络，默认输入分辨率 1024
 
 第一步：导出 ONNX（无损，推理速度 2-3x 提升）
 
@@ -9,7 +9,7 @@ export_onnx.py — 将训练好的 EAST PyTorch 模型导出为 ONNX 格式
     python detection_export_onnx.py \
         --model_path best_detection.pth \
         --output_path best_detection.onnx \
-        --input_size 768
+        --input_size 1024
 
 依赖:
     pip install onnx onnxruntime onnxsim onnxscript
@@ -30,7 +30,7 @@ except ImportError:
     from detection.models.east_model import EASTModel
 
 
-def export_onnx(model_path: str, output_path: str, input_size: int = 768):
+def export_onnx(model_path: str, output_path: str, input_size: int = 1024):
     """
     将 PyTorch EAST 模型导出为 ONNX 格式，并可选地使用 onnx-simplifier 优化。
 
@@ -186,6 +186,6 @@ def export_onnx(model_path: str, output_path: str, input_size: int = 768):
 if __name__ == "__main__":
     model_path = "best_detection.pth"
     output_path = "best_detection.onnx"
-    input_size = 768
+    input_size = 1024
 
     export_onnx(model_path, output_path, input_size)

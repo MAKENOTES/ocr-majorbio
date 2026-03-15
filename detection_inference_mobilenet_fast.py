@@ -39,7 +39,7 @@ DEFAULT_IMAGE_PATH    = "detection/data/test/1"
 DEFAULT_OUTPUT_DIR    = "detection/data/test_results/fast"
 DEFAULT_CROP_DIR      = "detection/data/crops/fast"
 
-INPUT_SIZE            = 768
+INPUT_SIZE            = 1024
 SCORE_THRESHOLD       = 0.7
 SCORE_THRESHOLD_SMALL = 0.5
 MIN_AREA              = 2
