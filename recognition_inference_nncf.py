@@ -147,7 +147,7 @@ def main():
                         help="字典文件路径")
     parser.add_argument("--output_file", type=str, default=None,
                         help="结果保存路径 (默认打印到控制台)")
-    parser.add_argument("--batch_size", type=int, default=1,
+    parser.add_argument("--batch_size", type=int, default=32,
                         help="批量大小")
     parser.add_argument("--device", type=str, default="CPU",
                         help="推理设备 (CPU / GPU / AUTO)")

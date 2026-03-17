@@ -188,14 +188,24 @@ class CRNN(nn.Module):
         b, c, h, w = conv.size()
         assert h == 1, f"CNN 输出高度必须为 1，当前为 {h}"
 
-        conv = conv.squeeze(2)       # [B, 256, W/4]
+        conv = conv.squeeze(2)  # [B, 256, W/4]
         conv = conv.permute(2, 0, 1)  # [W/4, B, 256]
 
         conv = self.cnn_dropout(conv)
 
-        rnn_out, _ = self.rnn(conv)        # [W/4, B, nh*2]
+        # ---- 新增：为 ONNX 显式初始化动态隐藏状态 ----
+        num_layers = self.rnn.num_layers
+        num_directions = 2 if self.rnn.bidirectional else 1
+        hidden_size = self.rnn.hidden_size
+
+        # 基于运行时的 batch size (b) 动态创建 h0
+        h0 = torch.zeros(num_layers * num_directions, b, hidden_size, device=conv.device)
+
+        rnn_out, _ = self.rnn(conv, h0)  # 显式传入 h0
+        # ------------------------------------------------------------------
+
         rnn_out = self.rnn_dropout(rnn_out)
-        output = self.embedding(rnn_out)    # [W/4, B, n_class]
+        output = self.embedding(rnn_out)  # [W/4, B, n_class]
 
         # ---- Padding Mask: 与原版逻辑完全相同 ----
         if img_widths is not None:
@@ -208,6 +218,40 @@ class CRNN(nn.Module):
             output[padding_mask, 0] = 0.0
 
         return F.log_softmax(output, dim=2)
+
+    # def forward(self, input, img_widths=None):
+    #     """
+    #     Args:
+    #         input: [B, C, 32, W] 图像张量（含 padding）
+    #         img_widths: [B] 每张图片 padding 前的真实像素宽度（可选）
+    #     Returns:
+    #         output: [SeqLen, B, NumClasses] log_softmax 后的输出
+    #     """
+    #     conv = self.cnn(input)  # [B, 256, 1, W/4]
+    #
+    #     b, c, h, w = conv.size()
+    #     assert h == 1, f"CNN 输出高度必须为 1，当前为 {h}"
+    #
+    #     conv = conv.squeeze(2)       # [B, 256, W/4]
+    #     conv = conv.permute(2, 0, 1)  # [W/4, B, 256]
+    #
+    #     conv = self.cnn_dropout(conv)
+    #
+    #     rnn_out, _ = self.rnn(conv)        # [W/4, B, nh*2]
+    #     rnn_out = self.rnn_dropout(rnn_out)
+    #     output = self.embedding(rnn_out)    # [W/4, B, n_class]
+    #
+    #     # ---- Padding Mask: 与原版逻辑完全相同 ----
+    #     if img_widths is not None:
+    #         seq_len = output.size(0)
+    #         # CNN 宽度下采样倍率 = 4
+    #         real_seq_lens = (img_widths.to(output.device) // 4).clamp(min=1)
+    #         time_indices = torch.arange(seq_len, device=output.device).unsqueeze(1)
+    #         padding_mask = time_indices >= real_seq_lens.unsqueeze(0)
+    #         output[padding_mask] = output.new_full((output.size(2),), -1e9)
+    #         output[padding_mask, 0] = 0.0
+    #
+    #     return F.log_softmax(output, dim=2)
 
     def _initialize_weights(self):
         for m in self.modules():

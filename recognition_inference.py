@@ -28,7 +28,7 @@ from recognition.components.dataset import InferenceDataset, dynamic_padding_col
 # 参数配置
 # ============================================================
 
-DEFAULT_MODEL_PATH  = "best_recognition_int8_static.onnx"
+DEFAULT_MODEL_PATH  = "best_recognition.onnx"
 DEFAULT_IMAGE_PATH  = "recognition/data/test_images"
 DEFAULT_KEYS_PATH   = "recognition/keys.txt"
 
@@ -146,9 +146,9 @@ def main():
     parser.add_argument("--output_file", type=str,
                         default=None)
     parser.add_argument("--backend",     type=str, choices=["auto", "onnx", "openvino", "pytorch"],
-                        default="onnx")
+                        default="openvino")
     parser.add_argument("--batch_size",  type=int,
-                        default=1, help="批量大小")
+                        default=32, help="批量大小")
     args = parser.parse_args()
 
     print("=" * 60)
