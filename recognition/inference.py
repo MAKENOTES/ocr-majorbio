@@ -32,7 +32,7 @@ IMG_HEIGHT = 32  # 固定高度
 NUM_CHANNELS = 1  # 1=灰度, 3=RGB
 
 # 3. 推理参数
-BATCH_SIZE = 1  # 批量大小 (显存允许可调大，例如 64, 128)
+BATCH_SIZE = 64  # 批量大小 (显存允许可调大，例如 64, 128)
 NUM_WORKERS = 2  # 数据加载线程数
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
