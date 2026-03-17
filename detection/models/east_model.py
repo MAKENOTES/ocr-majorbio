@@ -14,10 +14,11 @@ class EASTModel(nn.Module):
         features[7:13]  -> /16, 112ch  (对应 f3)
         features[13:17] -> /32, 960ch  (对应 f4，含最后的 1x1 conv 扩展)
 
-    FPN 自顶向下合并后输出 /4 特征图，接 score + geo 预测头。
-
-    ★ 改进：在 FPN 输出后增加空洞卷积上下文模块，弥补 MobileNetV3 感受野不足，
-      帮助模型更好地区分相邻文本行。
+    ★ 架构优化（对比旧版）：
+      1. FPN 通道加宽：64→128, 32→64, 24→64，对齐 ResNet50 版本的容量比例
+      2. 预测头加厚：在 1x1 输出前增加 3x3 conv，从 24ch 直接预测 → 64ch 中间层
+      3. 空洞卷积上下文模块同步加宽到 64ch
+      4. 整体参数量仍远小于 ResNet50 版本
     """
 
     def __init__(self, pretrained=True):
@@ -36,56 +37,65 @@ class EASTModel(nn.Module):
         self.stage1 = features[2:4]    # /4,  out: 24ch
         self.stage2 = features[4:7]    # /8,  out: 40ch
         self.stage3 = features[7:13]   # /16, out: 112ch
-        self.stage4 = features[13:17]  # /32, out: 960ch (含 features[16] 的 1x1 conv)
+        self.stage4 = features[13:17]  # /32, out: 960ch
 
         # ═══════════════════════════════════════════════════
-        # FPN 自顶向下路径
+        # FPN 自顶向下路径（★ 通道加宽）
         # ═══════════════════════════════════════════════════
         # 上采样 /32 → /16，与 stage3 (112ch) 拼接
         self.up4 = nn.ConvTranspose2d(960, 112, kernel_size=2, stride=2)
         self.fuse3 = nn.Sequential(
-            nn.Conv2d(112 + 112, 64, 3, padding=1),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(112 + 112, 128, 3, padding=1),   # ★ 64 → 128
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
         )
 
         # 上采样 /16 → /8，与 stage2 (40ch) 拼接
-        self.up3 = nn.ConvTranspose2d(64, 40, kernel_size=2, stride=2)
+        self.up3 = nn.ConvTranspose2d(128, 40, kernel_size=2, stride=2)  # ★ 64 → 128 输入
         self.fuse2 = nn.Sequential(
-            nn.Conv2d(40 + 40, 32, 3, padding=1),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(40 + 40, 64, 3, padding=1),      # ★ 32 → 64
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
 
         # 上采样 /8 → /4，与 stage1 (24ch) 拼接
-        self.up2 = nn.ConvTranspose2d(32, 24, kernel_size=2, stride=2)
+        self.up2 = nn.ConvTranspose2d(64, 24, kernel_size=2, stride=2)   # ★ 32 → 64 输入
         self.fuse1 = nn.Sequential(
-            nn.Conv2d(24 + 24, 24, 3, padding=1),
-            nn.BatchNorm2d(24),
+            nn.Conv2d(24 + 24, 64, 3, padding=1),      # ★ 24 → 64
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
 
         # ═══════════════════════════════════════════════════
-        # ★ 新增：空洞卷积上下文模块
-        # 用不同 dilation rate 捕获多尺度上下文，扩大有效感受野
-        # 帮助模型感知行间距，避免相邻行合并
+        # ★ 空洞卷积上下文模块（同步加宽到 64ch）
         # ═══════════════════════════════════════════════════
         self.context = nn.Sequential(
-            # dilation=2: 感受野扩大，捕获行级上下文
-            nn.Conv2d(24, 24, 3, padding=2, dilation=2),
-            nn.BatchNorm2d(24),
+            nn.Conv2d(64, 64, 3, padding=2, dilation=2),   # ★ 24 → 64
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
-            # dilation=4: 更大范围上下文，帮助区分段落/行
-            nn.Conv2d(24, 24, 3, padding=4, dilation=4),
-            nn.BatchNorm2d(24),
+            nn.Conv2d(64, 64, 3, padding=4, dilation=4),   # ★ 24 → 64
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
 
         # ═══════════════════════════════════════════════════
-        # 输出头：score map + geometry map（在 /4 分辨率上）
+        # ★ 加厚预测头：增加 3x3 中间层
+        # 旧版：24ch → 1x1 → score/geo（太薄，表达力不足）
+        # 新版：64ch → 3x3 → 64ch → 1x1 → score/geo
         # ═══════════════════════════════════════════════════
-        self.score_conv = nn.Conv2d(24, 1, kernel_size=1)
-        self.geo_conv   = nn.Conv2d(24, 4, kernel_size=1)
+        self.score_head = nn.Sequential(
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 1, kernel_size=1),
+        )
+
+        self.geo_head = nn.Sequential(
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 4, kernel_size=1),
+        )
 
     def forward(self, x):
         # 骨干网络前向传播，提取多尺度特征
@@ -97,16 +107,16 @@ class EASTModel(nn.Module):
 
         # FPN 自顶向下合并
         y = self.up4(f4)                           # /16, 112ch
-        y = self.fuse3(torch.cat([y, f3], dim=1))  # cat→224ch → 64ch
+        y = self.fuse3(torch.cat([y, f3], dim=1))  # cat→224ch → 128ch  ★
         y = self.up3(y)                            # /8,  40ch
-        y = self.fuse2(torch.cat([y, f2], dim=1))  # cat→80ch  → 32ch
+        y = self.fuse2(torch.cat([y, f2], dim=1))  # cat→80ch  → 64ch   ★
         y = self.up2(y)                            # /4,  24ch
-        y = self.fuse1(torch.cat([y, f1], dim=1))  # cat→48ch  → 24ch
+        y = self.fuse1(torch.cat([y, f1], dim=1))  # cat→48ch  → 64ch   ★
 
-        # ★ 空洞卷积上下文增强（残差连接，保留原始细节）
-        y = y + self.context(y)
+        # 空洞卷积上下文增强（残差连接）
+        y = y + self.context(y)                    # 64ch
 
-        # 输出预测
-        score = torch.sigmoid(self.score_conv(y))  # (N, 1, H/4, W/4)
-        geo   = self.geo_conv(y)                   # (N, 4, H/4, W/4)
+        # ★ 加厚预测头输出
+        score = torch.sigmoid(self.score_head(y))  # (N, 1, H/4, W/4)
+        geo   = self.geo_head(y)                   # (N, 4, H/4, W/4)
         return score, geo

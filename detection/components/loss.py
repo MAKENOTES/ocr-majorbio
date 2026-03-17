@@ -43,6 +43,7 @@ class EASTLoss(nn.Module):
         初始化 EAST 损失函数。
         :param lambda_iou: float, IoU 损失的权重。
         """
+        print("lambda_iou-----------------------------------------", lambda_iou)
         super(EASTLoss, self).__init__()
         self.dice_loss = DiceLoss()
         self.lambda_iou = lambda_iou

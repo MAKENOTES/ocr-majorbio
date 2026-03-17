@@ -142,7 +142,7 @@ class CRNN(nn.Module):
     注意: nh 默认值改为 256 (原版 512)，如需与原版一致请显式传参。
     """
 
-    def __init__(self, img_height, nc, n_class, nh=256):
+    def __init__(self, img_height, nc, n_class, nh=384):
         super(CRNN, self).__init__()
         assert img_height == 32, "CRNN 输入高度必须固定为 32"
 
@@ -160,9 +160,9 @@ class CRNN(nn.Module):
         # 单层 BiGRU (原版: 2层 BiLSTM)
         self.rnn = nn.GRU(
             input_size=cnn_out_channels,
-            hidden_size=nh,
-            num_layers=1,
-            dropout=0.0,  # 单层不需要 inter-layer dropout
+            hidden_size=nh,  # 256 → 384
+            num_layers=2,  # 1 → 2
+            dropout=0.15,  # 多层需要 inter-layer dropout
             bidirectional=True,
             batch_first=False,
         )

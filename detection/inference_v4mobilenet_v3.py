@@ -29,7 +29,7 @@ from models.east_model import EASTModel
 from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/detection_epoch_641.pth"
+MODEL_PATH = "detection/checkpoints/best_detection_epoch_512_train_loss_0.01475.pth"
 IMAGE_PATH = "detection/data/test/1"
 OUTPUT_DIR = "detection/data/test_results/mobilenet"
 

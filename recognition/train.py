@@ -23,7 +23,8 @@ import Levenshtein
 # ================= 配置区域 =================
 # 1. 路径配置
 TRAIN_ANNOTATION = "recognition/data/train_annotation.txt"
-VALID_ANNOTATION = "recognition/data/val_annotation.txt"
+# VALID_ANNOTATION = "recognition/data/val_annotation.txt" # 这个里面是从train_annotation取出来的
+VALID_ANNOTATION = "recognition/data/train_annotation.txt" #没有验证数据
 KEYS_PATH = "recognition/keys.txt"
 CHECKPOINT_DIR = "recognition/checkpoints/"
 

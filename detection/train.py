@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 # ★ 改动 1：降低学习率，MobileNetV3 通道窄，梯度传播特性不同
 LEARNING_RATE = 5e-5
 # ★ 改动 2：增大 batch size（MobileNetV3 更轻量，显存允许更大 batch）
-BATCH_SIZE = 8
+BATCH_SIZE = 12
 EPOCHS = 680
 INPUT_SIZE = 1024
 TRAIN_IMAGE_DIR = "detection/data/train_images"
@@ -201,7 +201,7 @@ def main():
         if name.startswith('stage0') or name.startswith('stage1'):
             param.requires_grad = False
 
-    criterion = EASTLoss().to(device)
+    criterion = EASTLoss(lambda_iou=3.0).to(device)
 
     # ★ 改动 4：增大 weight_decay 抑制过拟合
     optimizer = optim.AdamW(
