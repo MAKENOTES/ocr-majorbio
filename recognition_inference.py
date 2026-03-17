@@ -1,8 +1,8 @@
 """
-recognition_inference.py — 多后端优化识别推理脚本 (修复对齐版)
+recognition_inference.py — 多后端优化识别推理脚本 (修复版)
 =====================================================================
-修复了预处理不一致、Padding 居中导致准确率下降的问题。
-强对齐 inference.py 的预处理 (InferenceDataset) 和解码逻辑。
+修复: ONNX/OpenVINO 后端现在接收 img_widths 输入，与 PyTorch 后端行为一致。
+导出的 ONNX 模型包含 padding mask 逻辑，batch>1 时不再出现字符重复。
 """
 
 import os
@@ -40,31 +40,44 @@ NUM_CHANNELS        = 1
 # ============================================================
 
 class ONNXBackend:
-    """ONNX Runtime 后端"""
+    """ONNX Runtime 后端 (修复版: 传入 img_widths)"""
     def __init__(self, model_path: str):
         import onnxruntime as ort
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         opts.intra_op_num_threads = os.cpu_count()
         self.session = ort.InferenceSession(model_path, opts, providers=["CPUExecutionProvider"])
-        self.input_name = self.session.get_inputs()[0].name
+
+        # 检测模型是否包含 img_widths 输入
+        self.input_names = [inp.name for inp in self.session.get_inputs()]
+        self.has_img_widths = "img_widths" in self.input_names
+        if self.has_img_widths:
+            print(f"  ✓ ONNX 模型包含 img_widths 输入 (padding mask 已启用)")
+        else:
+            print(f"  ⚠ ONNX 模型不包含 img_widths 输入 (旧版导出，batch>1 可能不准)")
+
         self._warmup()
         print(f"  ✓ ONNX Runtime 后端加载完成")
 
     def _warmup(self, n: int = 3):
         dummy = np.random.randn(1, 1, IMG_HEIGHT, 256).astype(np.float32)
+        dummy_widths = np.array([256], dtype=np.int64)
         for _ in range(n):
-            self.session.run(None, {self.input_name: dummy})
+            feeds = {"input": dummy}
+            if self.has_img_widths:
+                feeds["img_widths"] = dummy_widths
+            self.session.run(None, feeds)
 
     def infer(self, images: torch.Tensor, img_widths: torch.Tensor):
-        # ONNX 通常不支持动态传 img_widths 给 RNN mask，只传图像
-        img_np = images.numpy()
-        outputs = self.session.run(None, {self.input_name: img_np})
-        return torch.from_numpy(outputs[0])  # 转回 Tensor 供 decoder 使用
+        feeds = {"input": images.numpy()}
+        if self.has_img_widths:
+            feeds["img_widths"] = img_widths.numpy().astype(np.int64)
+        outputs = self.session.run(None, feeds)
+        return torch.from_numpy(outputs[0])
 
 
 class OpenVINOBackend:
-    """OpenVINO 后端"""
+    """OpenVINO 后端 (修复版: 传入 img_widths)"""
     def __init__(self, model_path: str):
         from openvino import Core
         ie = Core()
@@ -72,30 +85,44 @@ class OpenVINOBackend:
         config = {"PERFORMANCE_HINT": "LATENCY"}
         self.compiled_model = ie.compile_model(model=model, device_name="CPU", config=config)
         self.infer_request = self.compiled_model.create_infer_request()
+
+        # 检测模型输入
+        self.input_names = [inp.any_name for inp in self.compiled_model.inputs]
+        self.has_img_widths = "img_widths" in self.input_names
+        if self.has_img_widths:
+            print(f"  ✓ OpenVINO 模型包含 img_widths 输入 (padding mask 已启用)")
+        else:
+            print(f"  ⚠ OpenVINO 模型不包含 img_widths 输入 (旧版导出)")
+
         self._warmup()
         print(f"  ✓ OpenVINO 后端加载完成")
 
     def _warmup(self, n: int = 3):
         dummy = np.random.randn(1, 1, IMG_HEIGHT, 256).astype(np.float32)
+        dummy_widths = np.array([256], dtype=np.int64)
         for _ in range(n):
-            self.infer_request.infer({"input": dummy})
+            feeds = {"input": dummy}
+            if self.has_img_widths:
+                feeds["img_widths"] = dummy_widths
+            self.infer_request.infer(feeds)
 
     def infer(self, images: torch.Tensor, img_widths: torch.Tensor):
-        img_np = images.numpy()
-        result = self.infer_request.infer({"input": img_np})
-        # 用 output name 精确获取，避免 OpenVINO 多输出顺序不确定
+        feeds = {"input": images.numpy()}
+        if self.has_img_widths:
+            feeds["img_widths"] = img_widths.numpy().astype(np.int64)
+
+        result = self.infer_request.infer(feeds)
         output_node = self.compiled_model.outputs[0]
-        out = result[output_node]
-        out = np.array(out)
-        # OpenVINO 可能改变 layout，需要确保输出是 [SeqLen, Batch, Classes]
-        # 如果第一维很小（=batch）而第二维很大（=seq_len），说明被转置了
+        out = np.array(result[output_node])
+
+        # OpenVINO 可能改变 layout
         if out.ndim == 3 and out.shape[0] < out.shape[1]:
             out = np.transpose(out, (1, 0, 2))
         return torch.from_numpy(out)
 
 
 class PyTorchBackend:
-    """原始 PyTorch 后端（完全等价于 inference.py）"""
+    """原始 PyTorch 后端"""
     def __init__(self, model_path: str, keys_path: str):
         from recognition.models.model import CRNN
         converter = LabelConverter(keys_path)
@@ -110,7 +137,6 @@ class PyTorchBackend:
 
     def infer(self, images: torch.Tensor, img_widths: torch.Tensor):
         with torch.no_grad():
-            # PyTorch 可以完美接收 img_widths 解决 RNN 对齐问题
             output = self.model(images, img_widths=img_widths)
         return output
 
@@ -136,7 +162,7 @@ def load_backend(model_path: str, backend: str, keys_path: str):
 # ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="CRNN 优化推理 (强对齐版)")
+    parser = argparse.ArgumentParser(description="CRNN 优化推理 (修复版)")
     parser.add_argument("--model_path",  type=str,
                         default=DEFAULT_MODEL_PATH)
     parser.add_argument("--image_path",  type=str,
@@ -152,7 +178,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("CRNN 优化推理 (与原始预处理强对齐)")
+    print("CRNN 优化推理 (修复版 - 支持 batch>1)")
     print("=" * 60)
 
     # 1. 收集图片
@@ -168,11 +194,13 @@ def main():
         print("✗ 未找到图像文件")
         return
 
+    print(f"发现 {len(image_paths)} 张待处理图片")
+
     # 2. 初始化核心组件
     converter = LabelConverter(args.keys_path)
     backend = load_backend(args.model_path, args.backend, args.keys_path)
 
-    # 3. 复用原始 InferenceDataset (保证缩放、右侧 Padding 100% 一致)
+    # 3. 复用原始 InferenceDataset
     dataset = InferenceDataset(
         image_paths=image_paths,
         img_height=IMG_HEIGHT,
@@ -194,10 +222,8 @@ def main():
     for images, paths, img_widths in loader:
         t0 = time.perf_counter()
 
-        # 统一接口调用（PyTorch 后端会使用 img_widths，ONNX/OpenVINO 内部忽略它）
+        # 统一接口: 所有后端都接收 img_widths
         preds = backend.infer(images, img_widths)
-
-        # 统一使用原生 converter 进行 CTC 解码
         pred_texts = converter.decode(preds)
 
         infer_ms = (time.perf_counter() - t0) * 1000
