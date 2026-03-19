@@ -181,6 +181,6 @@ def export_onnx(model_path: str, output_path: str, input_size: int = 1024):
 if __name__ == "__main__":
     model_path = "best_detection.pth"
     output_path = "best_detection.onnx"
-    input_size = 1024
+    input_size = 640
 
     export_onnx(model_path, output_path, input_size)

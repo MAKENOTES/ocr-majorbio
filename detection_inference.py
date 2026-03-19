@@ -50,7 +50,7 @@ DEFAULT_IMAGE_PATH  = "detection/data/test/2"
 DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized"
 DEFAULT_CROP_DIR    = "detection/data/crops/optimized"
 
-INPUT_SIZE          = 1024
+INPUT_SIZE          = 640
 SCORE_THRESHOLD     = 0.7
 MIN_AREA            = 2
 
