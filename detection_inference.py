@@ -45,14 +45,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 参数配置
 # ============================================================
 
-DEFAULT_MODEL_PATH  = "best_detection_int8_static.onnx"
-DEFAULT_IMAGE_PATH  = "detection/data/test/1"
+DEFAULT_MODEL_PATH  = "best_detection.onnx"
+DEFAULT_IMAGE_PATH  = "detection/data/test/2"
 DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized"
 DEFAULT_CROP_DIR    = "detection/data/crops/optimized"
 
-INPUT_SIZE          = 640
+INPUT_SIZE          = 1024
 SCORE_THRESHOLD     = 0.7
-SCORE_THRESHOLD_SMALL = 0.5   # 第二轮：小符号补充阈值，可调低到 0.4
 MIN_AREA            = 2
 
 SAVE_CROPS          = False
@@ -234,70 +233,6 @@ def preprocess(image_path: str, input_size: int):
     return arr, padded, (orig_w, orig_h)
 
 
-# # ============================================================
-# # 连通域聚类 + 边界统计（复用 inference_v2.py 核心逻辑）
-# # ============================================================
-#
-# def boxes_from_connected_components(score_map_np, geo_map_np,
-#                                      score_threshold=0.7, min_area=5):
-#     """
-#     核心检测逻辑：连通域聚类 + 边缘像素边界统计。
-#     完全复用 inference_v2.py 的高精度方案。
-#     """
-#     binary = (score_map_np > score_threshold).astype(np.uint8)
-#     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-#
-#     boxes = []
-#     stride = 4.0  # score_map 是原图的 1/4
-#
-#     for label_id in range(1, num_labels):
-#         area = stats[label_id, cv2.CC_STAT_AREA]
-#         if area < min_area:
-#             continue
-#
-#         ys, xs = np.where(labels == label_id)
-#         x_min_r, x_max_r = xs.min(), xs.max()
-#         y_min_r, y_max_r = ys.min(), ys.max()
-#         rw = x_max_r - x_min_r + 1
-#         rh = y_max_r - y_min_r + 1
-#
-#         ew = max(1, min(5, int(rw * 0.1)))
-#         eh = max(1, min(3, int(rh * 0.1)))
-#
-#         def edge_boundary(mask, pixel_coords, dist_channel, sign):
-#             if mask.sum() == 0:
-#                 return None
-#             dists = geo_map_np[dist_channel, ys[mask], xs[mask]]
-#             pixel_c = pixel_coords[mask] + 0.5
-#             return np.median(pixel_c + sign * dists)
-#
-#         x_min_f = edge_boundary(xs >= x_min_r, xs, 3, -1) or x_min_r         # dist_left
-#         x_max_f = edge_boundary(xs > x_max_r - ew, xs, 1, +1) or x_max_r + 1 # dist_right
-#         y_min_f = edge_boundary(ys >= y_min_r, ys, 0, -1) or y_min_r          # dist_top
-#         y_max_f = edge_boundary(ys > y_max_r - eh, ys, 2, +1) or y_max_r + 1  # dist_bottom
-#
-#         # 修正：左/右边缘掩码也要用 xs
-#         lm = (xs >= x_min_r) & (xs < x_min_r + ew)
-#         if lm.sum() > 0:
-#             x_min_f = np.median((xs[lm] + 0.5) - geo_map_np[3, ys[lm], xs[lm]])
-#         rm = (xs > x_max_r - ew) & (xs <= x_max_r)
-#         if rm.sum() > 0:
-#             x_max_f = np.median((xs[rm] + 0.5) + geo_map_np[1, ys[rm], xs[rm]])
-#         tm = (ys >= y_min_r) & (ys < y_min_r + eh)
-#         if tm.sum() > 0:
-#             y_min_f = np.median((ys[tm] + 0.5) - geo_map_np[0, ys[tm], xs[tm]])
-#         bm = (ys > y_max_r - eh) & (ys <= y_max_r)
-#         if bm.sum() > 0:
-#             y_max_f = np.median((ys[bm] + 0.5) + geo_map_np[2, ys[bm], xs[bm]])
-#
-#         box = [x_min_f * stride, y_min_f * stride,
-#                x_max_f * stride, y_max_f * stride]
-#         if box[2] - box[0] > 2 and box[3] - box[1] > 2:
-#             boxes.append(box)
-#
-#     return np.array(boxes) if boxes else np.array([])
-
-
 def box_from_small_region(ys, xs, geo_map_np, stride):
     """
     针对小连通域（√ 等单字符/符号）的出框策略。
@@ -322,29 +257,21 @@ def box_from_small_region(ys, xs, geo_map_np, stride):
 
 
 def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
-                                     score_threshold_small, min_area):
+                                     min_area):
     """
-    两轮完全独立的连通域检测：
+    单轮连通域检测：
 
-    第一轮（高阈值）：处理所有正常文本连通域
       - 大连通域（面积 >= SMALL_REGION_AREA）：边缘像素采样，精度高
         ★ 不做宽高比过滤，正文长文本行天然是扁长条
       - 小连通域（面积 < SMALL_REGION_AREA） ：全像素中位数出框
         ★ 对小连通域做宽高比过滤，去除细线噪点
-
-    第二轮（低阈值，仅补充）：捡回漏掉的弱激活小符号
-      - 凡与高阈值区域有任何像素重叠的连通域直接跳过
-      - 只处理完全游离在高阈值区域之外的小连通域
     """
     stride = 4.0
     boxes = []
 
-    # ════════════════════════════════════════════════════════
-    # 第一轮：高阈值，完整处理所有连通域
-    # ════════════════════════════════════════════════════════
-    binary_high = (score_map_np > score_threshold).astype(np.uint8)
+    binary = (score_map_np > score_threshold).astype(np.uint8)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        binary_high, connectivity=8
+        binary, connectivity=8
     )
 
     for label_id in range(1, num_labels):
@@ -394,37 +321,6 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
         if box[2] - box[0] > 2 and box[3] - box[1] > 2:
             boxes.append(box)
 
-    # ════════════════════════════════════════════════════════
-    # 第二轮：低阈值，仅补充捡回弱激活小符号
-    # 凡与高阈值区域有任何像素重叠，直接跳过
-    # ════════════════════════════════════════════════════════
-    if score_threshold_small < score_threshold:
-        binary_low = (score_map_np > score_threshold_small).astype(np.uint8)
-        num_labels_s, labels_s, stats_s, _ = cv2.connectedComponentsWithStats(
-            binary_low, connectivity=8
-        )
-
-        for label_id in range(1, num_labels_s):
-            area = stats_s[label_id, cv2.CC_STAT_AREA]
-            # 只捡回小面积连通域
-            if area < min_area or area >= SMALL_REGION_AREA:
-                continue
-
-            w_cc = stats_s[label_id, cv2.CC_STAT_WIDTH]
-            h_cc = stats_s[label_id, cv2.CC_STAT_HEIGHT]
-            if max(w_cc, h_cc) / (min(w_cc, h_cc) + 1e-6) > SMALL_MAX_ASPECT:
-                continue
-
-            ys, xs = np.where(labels_s == label_id)
-
-            # 与高阈值区域有任何重叠就跳过，第一轮已处理
-            if binary_high[ys, xs].any():
-                continue
-
-            box = box_from_small_region(ys, xs, geo_map_np, stride)
-            if box[2] - box[0] > 1 and box[3] - box[1] > 1:
-                boxes.append(box)
-
     return np.array(boxes) if boxes else np.array([])
 
 # ============================================================
@@ -458,13 +354,9 @@ def detect_one(backend, image_path: str, output_dir: str,
     geo_map_np = np.maximum(geo_map_np, 0)
 
     # --- 连通域检测 ---
-    # final_boxes = boxes_from_connected_components(
-    #     score_map_np, geo_map_np, score_threshold, MIN_AREA
-    # )
     final_boxes = boxes_from_connected_components(
         score_map_np, geo_map_np,
         score_threshold=score_threshold,
-        score_threshold_small=SCORE_THRESHOLD_SMALL,
         min_area=MIN_AREA,
     )
 

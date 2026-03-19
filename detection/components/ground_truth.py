@@ -90,7 +90,17 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
     for quad in quads:
         scaled_quad = quad * score_map_scale
 
-        shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
+        # ★ 自适应收缩：小框不收缩，防止单个符号（0、-、√ 等）在 score map 上消失
+        area = cv2.contourArea(scaled_quad.astype(np.int32))
+        if area < 10:
+            # 极小框：完全不收缩，否则 fillPoly 后面积为 0，模型学不到
+            shrunk_quad = scaled_quad
+        elif area < 50:
+            # 小框：轻度收缩（r=0.8 → d 约为正常收缩的 1/3）
+            shrunk_quad = shrink_polygon(scaled_quad, r=0.8)
+        else:
+            # 正常框：保持原有收缩力度
+            shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
 
         mask = np.zeros((score_map_h, score_map_w), dtype=np.uint8)
         cv2.fillPoly(mask, [shrunk_quad.astype(np.int32)], 1)

@@ -210,12 +210,6 @@ class CRNN(nn.Module):
 
         seq_len = conv.size(0)
 
-        # ---- 为 ONNX 显式初始化动态隐藏状态 ----
-        num_layers = self.rnn.num_layers
-        num_directions = 2 if self.rnn.bidirectional else 1
-        hidden_size = self.rnn.hidden_size
-        h0 = torch.zeros(num_layers * num_directions, b, hidden_size, device=conv.device)
-
         # ---- 关键：GRU 之前将 padding 区域的 CNN 特征置零 ----
         # 原理：反向 GRU 从序列末尾开始处理，如果 padding 区域有非零特征，
         # 反向隐状态会携带噪声传播到真实内容区域，导致边界字符重复。
@@ -235,7 +229,7 @@ class CRNN(nn.Module):
             # 扩展到特征维度 [SeqLen, B, 1] 并广播，将 padding 时间步的特征全部置零
             conv = conv.masked_fill(padding_mask.unsqueeze(2), 0.0)
 
-        rnn_out, _ = self.rnn(conv, h0)
+        rnn_out, _ = self.rnn(conv)
 
         rnn_out = self.rnn_dropout(rnn_out)
         output = self.embedding(rnn_out)  # [SeqLen, B, n_class]

@@ -1,5 +1,5 @@
 """
-inference_optimized.py — 多后端优化推理脚本
+detection_inference_mobilenet.py
 =====================================================================
 适配 MobileNetV3-Large 骨干网络，默认输入分辨率 768
 
@@ -9,26 +9,13 @@ inference_optimized.py — 多后端优化推理脚本
   3. OpenVINO            （Intel CPU 专属，5-10x 提速）
   4. PyTorch（原始，作为 fallback）
 
-推理逻辑完全复用 inference_v4mobilenet_v3.py 的连通域聚类方案（高精度框定位）。
-只替换了「模型加载 + 前向推理」部分。
+改动：移除两轮阈值检测，统一使用单一阈值。
 
 用法:
-    # 自动选最优后端
-    python detection_inference.py \
+    python detection_inference_mobilenet_fast.py \
         --model_path best_detection_int8_static.onnx \
         --image_path detection/data/test/1 \
         --output_dir detection/data/test_results/optimized
-
-    # 指定 OpenVINO 后端
-    python detection_inference.py \
-        --model_path best_detection.onnx \
-        --backend openvino \
-        --image_path your_image.jpg
-
-依赖:
-    pip install onnxruntime onnxsim
-    # OpenVINO（可选，Intel CPU 专属）:
-    pip install openvino
 """
 
 import os
@@ -48,22 +35,20 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ============================================================
 
 DEFAULT_MODEL_PATH  = "best_detection.onnx"
-DEFAULT_IMAGE_PATH  = "detection/data/test/1"
+DEFAULT_IMAGE_PATH  = "detection/data/test/2"
 DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized"
 DEFAULT_CROP_DIR    = "detection/data/crops/optimized"
 
-INPUT_SIZE          = 768
-SCORE_THRESHOLD     = 0.7
-SCORE_THRESHOLD_SMALL = 0.5   # 第二轮：小符号补充阈值，可调低到 0.4
-MIN_AREA            = 2
+INPUT_SIZE          = 640
+SCORE_THRESHOLD     = 0.7    # ★ 单一阈值
+MIN_AREA            = 5
 
 SAVE_CROPS          = False
 EXPAND_BOX          = True
 EXPAND_RATIO_W      = 0.30
 EXPAND_RATIO_H      = 0.10
-SMALL_REGION_AREA     = 15    # 面积 < 此值视为小符号，走不同出框策略
-# 注意：宽高比过滤只用于小连通域噪点过滤，大连通域不受限制
-SMALL_MAX_ASPECT      = 5.0   # 小连通域宽高比超过此值才过滤（正方形符号宽高比应接近1）
+SMALL_REGION_AREA   = 15
+SMALL_MAX_ASPECT    = 5.0
 
 
 # ============================================================
@@ -77,12 +62,9 @@ class ONNXBackend:
         import onnxruntime as ort
 
         opts = ort.SessionOptions()
-        # 开启全部图优化（自动算子融合：Conv+BN+ReLU 合并等）
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # 使用所有可用 CPU 核心
         opts.intra_op_num_threads = os.cpu_count()
         opts.inter_op_num_threads = max(1, os.cpu_count() // 2)
-        # 启用内存优化
         opts.enable_mem_pattern = True
         opts.enable_mem_reuse   = True
 
@@ -101,23 +83,15 @@ class ONNXBackend:
             self.session.run(None, {self.input_name: dummy})
 
     def infer(self, img_np: np.ndarray):
-        """
-        img_np: (1, 3, H, W) float32 numpy array
-        Returns: score_map (1,1,H,W), geo_map (1,4,H,W) numpy arrays
-        """
         outputs = self.session.run(None, {self.input_name: img_np})
         return outputs[0], outputs[1]
 
 
 class OpenVINOBackend:
-    """
-    OpenVINO 后端（Intel CPU 专属，比 ONNX Runtime 再快 2-3x）
-    支持直接从 .onnx 文件加载，无需额外转换。
-    """
+    """OpenVINO 后端（Intel CPU 专属）"""
 
     def __init__(self, model_path: str):
         try:
-            # from openvino.runtime import Core
             from openvino import Core
         except ImportError:
             raise ImportError(
@@ -126,11 +100,9 @@ class OpenVINOBackend:
             )
 
         ie = Core()
-        # 直接从 ONNX 加载（OpenVINO 原生支持）
         model = ie.read_model(model=model_path)
-        # 编译到 CPU，开启性能模式
         config = {
-            "PERFORMANCE_HINT": "THROUGHPUT",          # 吞吐量优先
+            "PERFORMANCE_HINT": "THROUGHPUT",
             "NUM_STREAMS": "AUTO",
         }
         self.compiled_model = ie.compile_model(model=model, device_name="CPU", config=config)
@@ -146,13 +118,12 @@ class OpenVINOBackend:
     def infer(self, img_np: np.ndarray):
         result = self.infer_request.infer({"input": img_np})
         outputs = list(result.values())
-        # OpenVINO 输出顺序可能不固定，按形状判断
-        out_list = sorted(outputs, key=lambda x: x.shape[1])  # 通道数少的是 score
+        out_list = sorted(outputs, key=lambda x: x.shape[1])
         return out_list[0], out_list[1]
 
 
 class PyTorchBackend:
-    """原始 PyTorch 后端（fallback，无优化）"""
+    """原始 PyTorch 后端（fallback）"""
 
     def __init__(self, model_path: str):
         import torch
@@ -175,13 +146,6 @@ class PyTorchBackend:
 
 
 def load_backend(model_path: str, backend: str):
-    """
-    根据指定后端或文件扩展名自动选择最优后端。
-    自动选择逻辑：
-      .onnx → 优先 ONNX Runtime
-      .pth  → PyTorch
-      backend='openvino' → OpenVINO（需要安装）
-    """
     ext = os.path.splitext(model_path)[1].lower()
 
     if backend == "auto":
@@ -205,14 +169,10 @@ def load_backend(model_path: str, backend: str):
 
 
 # ============================================================
-# 图像预处理（与训练保持完全一致）
+# 图像预处理
 # ============================================================
 
 def preprocess(image_path: str, input_size: int):
-    """
-    加载 & 预处理图像。
-    返回: (img_tensor_np, resized_pil_img, (orig_w, orig_h))
-    """
     try:
         image = Image.open(image_path).convert("RGB")
     except Exception as e:
@@ -221,7 +181,6 @@ def preprocess(image_path: str, input_size: int):
 
     orig_w, orig_h = image.size
 
-    # ResizeAndPad：保持宽高比
     scale = min(input_size / orig_w, input_size / orig_h)
     new_w, new_h = int(orig_w * scale), int(orig_h * scale)
     resized = image.resize((new_w, new_h), Image.Resampling.BICUBIC)
@@ -229,86 +188,21 @@ def preprocess(image_path: str, input_size: int):
     padded = Image.new("RGB", (input_size, input_size), (128, 128, 128))
     padded.paste(resized, ((input_size - new_w) // 2, (input_size - new_h) // 2))
 
-    # HWC→CHW, float32, ImageNet normalize
     arr = np.array(padded).astype(np.float32) / 255.0
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     arr = (arr - mean) / std
-    arr = arr.transpose(2, 0, 1)[np.newaxis]   # (1, 3, H, W)
+    arr = arr.transpose(2, 0, 1)[np.newaxis]
 
     return arr, padded, (orig_w, orig_h)
 
 
-# # ============================================================
-# # 连通域聚类 + 边界统计（复用 inference_v2.py 核心逻辑）
-# # ============================================================
-#
-# def boxes_from_connected_components(score_map_np, geo_map_np,
-#                                      score_threshold=0.7, min_area=5):
-#     """
-#     核心检测逻辑：连通域聚类 + 边缘像素边界统计。
-#     完全复用 inference_v2.py 的高精度方案。
-#     """
-#     binary = (score_map_np > score_threshold).astype(np.uint8)
-#     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-#
-#     boxes = []
-#     stride = 4.0  # score_map 是原图的 1/4
-#
-#     for label_id in range(1, num_labels):
-#         area = stats[label_id, cv2.CC_STAT_AREA]
-#         if area < min_area:
-#             continue
-#
-#         ys, xs = np.where(labels == label_id)
-#         x_min_r, x_max_r = xs.min(), xs.max()
-#         y_min_r, y_max_r = ys.min(), ys.max()
-#         rw = x_max_r - x_min_r + 1
-#         rh = y_max_r - y_min_r + 1
-#
-#         ew = max(1, min(5, int(rw * 0.1)))
-#         eh = max(1, min(3, int(rh * 0.1)))
-#
-#         def edge_boundary(mask, pixel_coords, dist_channel, sign):
-#             if mask.sum() == 0:
-#                 return None
-#             dists = geo_map_np[dist_channel, ys[mask], xs[mask]]
-#             pixel_c = pixel_coords[mask] + 0.5
-#             return np.median(pixel_c + sign * dists)
-#
-#         x_min_f = edge_boundary(xs >= x_min_r, xs, 3, -1) or x_min_r         # dist_left
-#         x_max_f = edge_boundary(xs > x_max_r - ew, xs, 1, +1) or x_max_r + 1 # dist_right
-#         y_min_f = edge_boundary(ys >= y_min_r, ys, 0, -1) or y_min_r          # dist_top
-#         y_max_f = edge_boundary(ys > y_max_r - eh, ys, 2, +1) or y_max_r + 1  # dist_bottom
-#
-#         # 修正：左/右边缘掩码也要用 xs
-#         lm = (xs >= x_min_r) & (xs < x_min_r + ew)
-#         if lm.sum() > 0:
-#             x_min_f = np.median((xs[lm] + 0.5) - geo_map_np[3, ys[lm], xs[lm]])
-#         rm = (xs > x_max_r - ew) & (xs <= x_max_r)
-#         if rm.sum() > 0:
-#             x_max_f = np.median((xs[rm] + 0.5) + geo_map_np[1, ys[rm], xs[rm]])
-#         tm = (ys >= y_min_r) & (ys < y_min_r + eh)
-#         if tm.sum() > 0:
-#             y_min_f = np.median((ys[tm] + 0.5) - geo_map_np[0, ys[tm], xs[tm]])
-#         bm = (ys > y_max_r - eh) & (ys <= y_max_r)
-#         if bm.sum() > 0:
-#             y_max_f = np.median((ys[bm] + 0.5) + geo_map_np[2, ys[bm], xs[bm]])
-#
-#         box = [x_min_f * stride, y_min_f * stride,
-#                x_max_f * stride, y_max_f * stride]
-#         if box[2] - box[0] > 2 and box[3] - box[1] > 2:
-#             boxes.append(box)
-#
-#     return np.array(boxes) if boxes else np.array([])
-
+# ============================================================
+# 连通域检测（单阈值版）
+# ============================================================
 
 def box_from_small_region(ys, xs, geo_map_np, stride):
-    """
-    针对小连通域（√ 等单字符/符号）的出框策略。
-    取所有像素 geo 预测的中位数，比边缘采样更稳定。
-    geo_map_np 此时已经过 expm1 还原，是真实像素距离。
-    """
+    """小连通域出框：全像素中位数"""
     d_top    = np.median(geo_map_np[0, ys, xs])
     d_right  = np.median(geo_map_np[1, ys, xs])
     d_bottom = np.median(geo_map_np[2, ys, xs])
@@ -326,30 +220,16 @@ def box_from_small_region(ys, xs, geo_map_np, stride):
     return box
 
 
-def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
-                                     score_threshold_small, min_area):
+def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold, min_area):
     """
-    两轮完全独立的连通域检测：
-
-    第一轮（高阈值）：处理所有正常文本连通域
-      - 大连通域（面积 >= SMALL_REGION_AREA）：边缘像素采样，精度高
-        ★ 不做宽高比过滤，正文长文本行天然是扁长条
-      - 小连通域（面积 < SMALL_REGION_AREA） ：全像素中位数出框
-        ★ 对小连通域做宽高比过滤，去除细线噪点
-
-    第二轮（低阈值，仅补充）：捡回漏掉的弱激活小符号
-      - 凡与高阈值区域有任何像素重叠的连通域直接跳过
-      - 只处理完全游离在高阈值区域之外的小连通域
+    单轮连通域检测：统一阈值，按面积分类处理。
     """
     stride = 4.0
     boxes = []
 
-    # ════════════════════════════════════════════════════════
-    # 第一轮：高阈值，完整处理所有连通域
-    # ════════════════════════════════════════════════════════
-    binary_high = (score_map_np > score_threshold).astype(np.uint8)
+    binary = (score_map_np > score_threshold).astype(np.uint8)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        binary_high, connectivity=8
+        binary, connectivity=8
     )
 
     for label_id in range(1, num_labels):
@@ -359,10 +239,8 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
         ys, xs = np.where(labels == label_id)
 
-        # ── 小连通域（单符号）──────────────────────────────
+        # ── 小连通域 ──
         if area < SMALL_REGION_AREA:
-            # 小连通域才做宽高比过滤（去除细线噪点）
-            # √ 等符号宽高比接近 1，细线噪点宽高比极大
             w_cc = stats[label_id, cv2.CC_STAT_WIDTH]
             h_cc = stats[label_id, cv2.CC_STAT_HEIGHT]
             if max(w_cc, h_cc) / (min(w_cc, h_cc) + 1e-6) > SMALL_MAX_ASPECT:
@@ -372,8 +250,7 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
                 boxes.append(box)
             continue
 
-        # ── 大连通域（文本行）：边缘像素采样出框 ────────────
-        # ★ 不加宽高比过滤，正文长文本行宽高比本来就大
+        # ── 大连通域：边缘像素采样 ──
         x_min_r = xs.min();  x_max_r = xs.max()
         y_min_r = ys.min();  y_max_r = ys.max()
         rw = x_max_r - x_min_r + 1
@@ -399,38 +276,8 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
         if box[2] - box[0] > 2 and box[3] - box[1] > 2:
             boxes.append(box)
 
-    # ════════════════════════════════════════════════════════
-    # 第二轮：低阈值，仅补充捡回弱激活小符号
-    # 凡与高阈值区域有任何像素重叠，直接跳过
-    # ════════════════════════════════════════════════════════
-    if score_threshold_small < score_threshold:
-        binary_low = (score_map_np > score_threshold_small).astype(np.uint8)
-        num_labels_s, labels_s, stats_s, _ = cv2.connectedComponentsWithStats(
-            binary_low, connectivity=8
-        )
-
-        for label_id in range(1, num_labels_s):
-            area = stats_s[label_id, cv2.CC_STAT_AREA]
-            # 只捡回小面积连通域
-            if area < min_area or area >= SMALL_REGION_AREA:
-                continue
-
-            w_cc = stats_s[label_id, cv2.CC_STAT_WIDTH]
-            h_cc = stats_s[label_id, cv2.CC_STAT_HEIGHT]
-            if max(w_cc, h_cc) / (min(w_cc, h_cc) + 1e-6) > SMALL_MAX_ASPECT:
-                continue
-
-            ys, xs = np.where(labels_s == label_id)
-
-            # 与高阈值区域有任何重叠就跳过，第一轮已处理
-            if binary_high[ys, xs].any():
-                continue
-
-            box = box_from_small_region(ys, xs, geo_map_np, stride)
-            if box[2] - box[0] > 1 and box[3] - box[1] > 1:
-                boxes.append(box)
-
     return np.array(boxes) if boxes else np.array([])
+
 
 # ============================================================
 # 单图推理
@@ -444,43 +291,30 @@ def detect_one(backend, image_path: str, output_dir: str,
                ratio_w: float = EXPAND_RATIO_W,
                ratio_h: float = EXPAND_RATIO_H,
                timing: bool = False):
-    """
-    对单张图像执行检测，保存可视化结果和（可选）裁剪图像。
-    """
     img_np, resized_pil, (orig_w, orig_h) = preprocess(image_path, input_size)
     if img_np is None:
         return 0, 0.0
 
-    # --- 前向推理 ---
     t0 = time.perf_counter()
     score_raw, geo_raw = backend.infer(img_np)
     infer_ms = (time.perf_counter() - t0) * 1000
 
-    # score_map: (1,1,H,W) → (H,W)
     score_map_np = score_raw[0, 0]
-    # geo_map: (1,4,H,W) → (4,H,W)，从 log 空间还原
     geo_map_np = np.expm1(geo_raw[0, :4])
     geo_map_np = np.maximum(geo_map_np, 0)
 
-    # --- 连通域检测 ---
-    # final_boxes = boxes_from_connected_components(
-    #     score_map_np, geo_map_np, score_threshold, MIN_AREA
-    # )
     final_boxes = boxes_from_connected_components(
         score_map_np, geo_map_np,
         score_threshold=score_threshold,
-        score_threshold_small=SCORE_THRESHOLD_SMALL,
         min_area=MIN_AREA,
     )
 
-    # --- 坐标映射参数 ---
     scale = input_size / max(orig_h, orig_w)
     content_w = int(orig_w * scale)
     content_h = int(orig_h * scale)
     pad_x = (input_size - content_w) // 2
     pad_y = (input_size - content_h) // 2
 
-    # --- 绘图 & 保存 ---
     img_vis = cv2.cvtColor(np.array(resized_pil), cv2.COLOR_RGB2BGR)
     img_orig = cv2.imread(image_path)
     if img_orig is None:
@@ -505,7 +339,6 @@ def detect_one(backend, image_path: str, output_dir: str,
                 x1 -= dh * ratio_w;  x2 += dh * ratio_w
                 y1 -= dh * ratio_h;  y2 += dh * ratio_h
 
-            # 映射回原图坐标
             rx1 = max(0,      int((x1 - pad_x) / scale))
             ry1 = max(0,      int((y1 - pad_y) / scale))
             rx2 = min(real_w, int((x2 - pad_x) / scale))
@@ -542,37 +375,28 @@ def detect_one(backend, image_path: str, output_dir: str,
 # ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="EAST 优化推理（ONNX/INT8/OpenVINO）")
-    parser.add_argument("--model_path",  type=str,
-                        default=DEFAULT_MODEL_PATH)
-    parser.add_argument("--image_path",  type=str,
-                        default=DEFAULT_IMAGE_PATH,
-                        help="推理需要的图像文件路径")
-    parser.add_argument("--output_dir",  type=str,
-                        default=DEFAULT_OUTPUT_DIR,
-                        help="推理产生的图像文件路径")
+    parser = argparse.ArgumentParser(description="EAST 单阈值优化推理（ONNX/INT8/OpenVINO）")
+    parser.add_argument("--model_path",  type=str, default=DEFAULT_MODEL_PATH)
+    parser.add_argument("--image_path",  type=str, default=DEFAULT_IMAGE_PATH)
+    parser.add_argument("--output_dir",  type=str, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--backend",     type=str, choices=["auto", "onnx", "openvino", "pytorch"],
-                        default="openvino",
-                        help="推理后端（auto=自动选择）")
-    parser.add_argument("--input_size",  type=int,
-                        default=INPUT_SIZE)
-    parser.add_argument("--score_thr",   type=float,
-                        default=SCORE_THRESHOLD)
-    parser.add_argument("--save_crops",  action="store_true",
-                        default=SAVE_CROPS)
-    parser.add_argument("--benchmark",   action="store_true",
-                        help="显示每张图的推理耗时")
+                        default="openvino")
+    parser.add_argument("--input_size",  type=int, default=INPUT_SIZE)
+    parser.add_argument("--score_thr",   type=float, default=SCORE_THRESHOLD)
+    parser.add_argument("--save_crops",  action="store_true", default=SAVE_CROPS)
+    parser.add_argument("--benchmark",   action="store_true")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     print("=" * 60)
-    print("EAST 优化推理")
+    print("EAST 单阈值优化推理")
     print("=" * 60)
     print(f"  模型:    {args.model_path}")
     print(f"  输入:    {args.image_path}")
     print(f"  输出:    {args.output_dir}")
     print(f"  后端:    {args.backend}")
+    print(f"  阈值:    {args.score_thr} (单阈值)")
     print(f"  CPU核心: {os.cpu_count()}")
     print()
 
@@ -580,10 +404,8 @@ def main():
         print(f"✗ 模型文件不存在: {args.model_path}")
         return
 
-    # 加载后端
     backend = load_backend(args.model_path, args.backend)
 
-    # 收集图像文件
     if os.path.isdir(args.image_path):
         images = []
         for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp"]:
@@ -601,7 +423,6 @@ def main():
 
     print(f"\n共 {len(images)} 张图像，开始推理...\n")
 
-    # 批量推理
     total_boxes = 0
     total_ms = 0.0
     t_wall_start = time.perf_counter()
@@ -619,7 +440,6 @@ def main():
 
     t_wall = time.perf_counter() - t_wall_start
 
-    # 汇总统计
     print(f"\n{'='*60}")
     print(f"推理完成")
     print(f"  图像数:         {len(images)} 张")

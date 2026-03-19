@@ -270,7 +270,7 @@ def main():
                         default=100,
                         help="校准图像数量（建议 50-200 张）")
     parser.add_argument("--input_size", type=int,
-                        default=640,
+                        default=1024,
                         help="模型输入尺寸")
     parser.add_argument("--no_benchmark", action="store_true",
                         help="跳过 benchmark 测试")
