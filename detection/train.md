@@ -94,9 +94,8 @@
         但是还是存在一些问题， 表格线条被框出来了。
 
 重要总结：
-    1、造成应该是两行框 ，只有一行框的问题 ，以及 小的单个符号没有标记。  都是因为分辨率问题，从1024 降到 640  就会出现。 如果是768  此问题会被改善很多（造成应该是两行框 ，只有一行框的问题）。
-    2、使用 resnet18和 mobilenet ，带来了不少小问题， 可以考虑50 看看优化后的性能。
-    3、mobilenet 静态量化，不推荐， 即不能提高速度，还是降低准确， 后面可以再尝试量化。
+    1、造成应该是两行框 ，只有一行框的问题 ，以及 小的单个符号没有标记。  都是因为分辨率问题，从1024 降到 640  就会出现。 如果是768  此问题会被改善很多（造成应该是两行框 ，只有一行框的问题， 其实时代码问题，看20260320的总结）。
+    2、mobilenet 静态量化，不推荐， 难以提高速度和降低准确， 后面可以再尝试量化。
 
 20260315 mobilenet 使用1024 分辨率，  验证20260313 的问题。
     下一步
@@ -106,4 +105,133 @@
         1024 训练结果 best_detection_epoch_368_train_loss_0.01697_mobilenet1024，  出框基本没啥问题。
         640  训练结果 best_detection_epoch_441_train_loss_0.01042_mobilenet_640，  出框问题多，漏框，本应该两个框，只有一个框。
 
-20260319
+
+20260320
+    改动
+        input_size 640、
+        resnet18、
+        原来  max_d = (min_side - 1.0) / 2.0   其中1.0 时常量，改成  max_d = min_side * 0.45
+    1、根据缩放策略 一次 ,  结果出现少部分表格数据出框不好，不在乎表格的可以使用。
+        best_detection_epoch_155_loss_0.02183_resnet_640
+    2、缩放统一 0.2  一次, 结果基本ok。
+        best_detection_epoch_155_loss_0.02183_resnet_640
+    3、更多指标训练脚步  一次
+
+
+    总结：
+        1、input_size 由1024改成640  原来  max_d = (min_side - 1.0) / 2.0   其中1.0 时常量，改成  max_d = min_side * 0.45 可以适配640。解决上下两行仅出一个框问题
+
+
+20260321
+    (.venv) weiqiang@weiqiang:~/AI/ocr-majorbio$ python detection_quantize_int8_v2.py
+    ============================================================
+    EAST 模型 INT8 静态量化 v2
+    ============================================================
+      输入模型:     best_detection.onnx
+      输出模型:     best_detection_int8_static.onnx
+      量化格式:     QOperator (U8S8) → 文件体积缩小
+      校准目录:     detection/data/val_images
+      校准样本数:   100
+      Per-channel:  False
+      Reduce-range: False
+      校准方法:     MinMax
+      输入尺寸:     640x640
+
+    [1/6] 原始 FP32 模型大小: 47.6 MB
+
+    [2/6] 分析模型结构，定位敏感输出节点...
+      自动排除输出头节点: ['node_conv2d_23', 'node_sigmoid', 'node_conv2d_24']
+        → 这些节点保留 FP32 精度，避免 score/geo 量化误差
+
+    [3/6] 模型预处理 (shape inference + optimization)...
+      预处理模型: best_detection.onnx → best_detection_prep.onnx
+      ✓ 预处理完成
+      自动排除输出头节点: ['node_conv2d_23', 'node_sigmoid', 'node_conv2d_24']
+        → 这些节点保留 FP32 精度，避免 score/geo 量化误差
+
+    [4/6] 准备校准数据...
+      校准图像: 100 张 (来自 detection/data/val_images)
+      成功加载 100 张校准图像
+
+    [5/6] 执行 INT8 静态量化 (QOperator)...
+      ✓ 量化完成！ (耗时 131.7s)
+      FP32 模型:  47.6 MB
+      INT8 模型:  13.5 MB
+      压缩比:     3.51x
+
+    [6/6] 验证 FP32 vs INT8 输出一致性...
+      score_map 最大误差:   2.7082e-02
+      score_map 平均误差:   1.3599e-05
+      score_map 相关系数:   0.898516
+      geo_map   最大误差:   6.7916e-01
+      geo_map   平均误差:   6.2656e-02
+      ⚠ 精度损失较大，建议：
+        1. 尝试 per-channel 量化 (--per_channel)
+        2. 尝试 Entropy 校准 (--calibrate_method entropy)
+        3. 增加校准样本 (--calib_num 200)
+        4. 非 VNNI CPU 尝试 --reduce_range
+
+    [Benchmark] 速度对比 (CPU, 5次预热 + 20次计时)...
+      ONNX FP32:           1780.2 ms/张
+      ONNX INT8:           34.6 ms/张
+      INT8 加速比:            51.52x
+
+    ============================================================
+    ✓ INT8 静态量化完成: best_detection_int8_static.onnx
+      模型大小: 47.6 MB → 13.5 MB (3.5x 压缩)
+      用法: 直接替换推理脚本中的模型路径
+      示例: python detection_inference.py --model_path best_detection_int8_static.onnx
+    ============================================================
+    (.venv) weiqiang@weiqiang:~/AI/ocr-majorbio$ python detection_quantize_int8_v2.py
+    ============================================================
+    EAST 模型 INT8 静态量化 v2
+    ============================================================
+      输入模型:     best_detection.onnx
+      输出模型:     best_detection_int8_static.onnx
+      量化格式:     QOperator (U8S8) → 文件体积缩小
+      校准目录:     (随机数据)
+      校准样本数:   100
+      Per-channel:  False
+      Reduce-range: False
+      校准方法:     MinMax
+      输入尺寸:     640x640
+
+    [1/6] 原始 FP32 模型大小: 47.6 MB
+
+    [2/6] 分析模型结构，定位敏感输出节点...
+      自动排除输出头节点: ['node_conv2d_23', 'node_sigmoid', 'node_conv2d_24']
+        → 这些节点保留 FP32 精度，避免 score/geo 量化误差
+
+    [3/6] 模型预处理 (shape inference + optimization)...
+      预处理模型: best_detection.onnx → best_detection_prep.onnx
+      ✓ 预处理完成
+      自动排除输出头节点: ['node_conv2d_23', 'node_sigmoid', 'node_conv2d_24']
+        → 这些节点保留 FP32 精度，避免 score/geo 量化误差
+
+    [4/6] 准备校准数据...
+      使用随机校准数据 (100 条)
+
+    [5/6] 执行 INT8 静态量化 (QOperator)...
+      ✓ 量化完成！ (耗时 118.9s)
+      FP32 模型:  47.6 MB
+      INT8 模型:  13.5 MB
+      压缩比:     3.51x
+
+    [6/6] 验证 FP32 vs INT8 输出一致性...
+      score_map 最大误差:   1.6132e-01
+      score_map 平均误差:   3.2991e-05
+      score_map 相关系数:   0.993084
+      geo_map   最大误差:   4.9910e-01
+      geo_map   平均误差:   5.7317e-02
+      ✓ 精度优秀，量化几乎无损
+
+    [Benchmark] 速度对比 (CPU, 5次预热 + 20次计时)...
+      ONNX FP32:           1514.4 ms/张
+      ONNX INT8:           35.4 ms/张
+      INT8 加速比:            42.72x
+
+    ============================================================
+    ✓ INT8 静态量化完成: best_detection_int8_static.onnx
+      模型大小: 47.6 MB → 13.5 MB (3.5x 压缩)
+      用法: 直接替换推理脚本中的模型路径
+      示例: python detection_inference.py --model_path best_detection_int8_static.onnx

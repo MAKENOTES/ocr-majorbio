@@ -45,7 +45,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 参数配置
 # ============================================================
 
-DEFAULT_MODEL_PATH  = "best_detection.onnx"
+DEFAULT_MODEL_PATH  = "best_detection_int8.onnx"
 DEFAULT_IMAGE_PATH  = "detection/data/test/2"
 DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized"
 DEFAULT_CROP_DIR    = "detection/data/crops/optimized"

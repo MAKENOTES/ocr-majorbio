@@ -54,24 +54,42 @@ def export_onnx(model_path: str, output_path: str, input_size: int = 1024):
     print(f"[3/4] 导出 ONNX 到: {output_path}")
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
 
-    torch.onnx.export(
-        model,
-        dummy_input,
-        output_path,
-        export_params=True,
-        opset_version=12,           # opset 12 对 CNN 支持最稳定
-        do_constant_folding=True,   # 常量折叠优化（自动合并固定计算节点）
-        input_names=["input"],
-        output_names=["score_map", "geo_map"],
-        dynamic_axes={
-            # 允许动态 batch size，方便批量推理
-            "input":     {0: "batch_size"},
-            "score_map": {0: "batch_size"},
-            "geo_map":   {0: "batch_size"},
-        },
-        verbose=False,
-    )
-    print(f"    ✓ 基础 ONNX 导出完成")
+    # ---------- 优先使用新 dynamo 导出器 ----------
+    try:
+        batch_dim = torch.export.Dim("batch_size", min=1, max=32)
+        dynamic_shapes = ({0: batch_dim},)  # 对应 forward(self, x) 的第一个参数 x
+
+        torch.onnx.export(
+            model,
+            (dummy_input,),
+            output_path,
+            input_names=["input"],
+            output_names=["score_map", "geo_map"],
+            dynamo=True,
+            dynamic_shapes=dynamic_shapes,
+            verbose=False,
+        )
+        print(f"    ✓ 基础 ONNX 导出完成 (dynamo 导出器)")
+
+    except Exception as e:
+        # ---------- 回退到传统 TorchScript 导出器 ----------
+        print(f"    ⚠ dynamo 导出失败 ({e})，回退到传统导出器...")
+        torch.onnx.export(
+            model,
+            dummy_input,
+            output_path,
+            opset_version=18,
+            input_names=["input"],
+            output_names=["score_map", "geo_map"],
+            dynamic_axes={
+                "input": {0: "batch_size"},
+                "score_map": {0: "batch_size"},
+                "geo_map": {0: "batch_size"},
+            },
+            verbose=False,
+            dynamo=False,
+        )
+        print(f"    ✓ 基础 ONNX 导出完成 (传统导出器)")
 
     # 4. 使用 onnxsim 简化模型（可选但强烈推荐）
     print(f"[4/4] 尝试使用 onnx-simplifier 进行图优化...")

@@ -15,7 +15,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 # --- 超参数 ---
 LEARNING_RATE =  1e-4  #1e-5 1e-4 3e-5
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
-EPOCHS = 500
+EPOCHS = 680
 INPUT_SIZE = 640
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"
@@ -215,7 +215,7 @@ def main():
     # --- 模型、损失函数和优化器 ---
     model = EASTModel(pretrained=True).to(device)
     # model.load_state_dict(torch.load("detection/checkpoints/best_detection_490_loss_0.0880.pth"))
-    criterion = EASTLoss().to(device)
+    criterion = EASTLoss(lambda_iou = 3).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = OneCycleLR(optimizer, max_lr=3e-4,
                            steps_per_epoch=len(train_loader),
