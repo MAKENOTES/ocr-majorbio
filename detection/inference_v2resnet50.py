@@ -44,7 +44,7 @@ EXPAND_BOX = True
 EXPAND_RATIO_W = 0.30   # 左右扩充 = 字高 * 0.3
 EXPAND_RATIO_H = 0.10   # 上下扩充 = 字高 * 0.1
 
-INPUT_SIZE = 640
+INPUT_SIZE = 1024
 SCORE_THRESHOLD = 0.7    # 可以比原来低一些，因为连通域方法更鲁棒
 MIN_AREA = 5             # 最小连通域面积（score map 像素数），过滤噪点
 

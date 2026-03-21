@@ -115,14 +115,15 @@
         best_detection_epoch_155_loss_0.02183_resnet_640
     2、缩放统一 0.2  一次, 结果基本ok。
         best_detection_epoch_155_loss_0.02183_resnet_640
-    3、更多指标训练脚步  一次
+
 
 
     总结：
         1、input_size 由1024改成640  原来  max_d = (min_side - 1.0) / 2.0   其中1.0 时常量，改成  max_d = min_side * 0.45 可以适配640。解决上下两行仅出一个框问题
 
 
-20260321
+20260321   resnet50 ，1024 分辨率 更多指标训练脚步  一次
+
     (.venv) weiqiang@weiqiang:~/AI/ocr-majorbio$ python detection_quantize_int8_v2.py
     ============================================================
     EAST 模型 INT8 静态量化 v2
