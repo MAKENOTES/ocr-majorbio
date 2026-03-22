@@ -10,7 +10,7 @@ from components.dataset import OCRDataset
 from components.transforms import get_transforms
 from models.east_model import EASTModel
 from components.loss import EASTLoss
-from detection.components.eval_metrics import evaluate_detection
+from components.eval_metrics import evaluate_detection
 from torch.optim.lr_scheduler import OneCycleLR
 
 # --- 超参数 ---
@@ -327,7 +327,6 @@ def main():
             should_eval_detection = (
                 val_dataset_raw is not None
                 and epoch >= START_EVAL_EPOCH
-                and (epoch % EVAL_INTERVAL == 0 or epoch == EPOCHS)
             )
             if should_eval_detection:
                 print(f"  正在运行检测评估 (P/R/F1)...")

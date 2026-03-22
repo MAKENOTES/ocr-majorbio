@@ -546,7 +546,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--input_model", type=str, default="best_detection.onnx")
     parser.add_argument("--output_model", type=str, default="best_detection_int8_static.onnx")
-    parser.add_argument("--calib_dir", type=str, default=None,
+    parser.add_argument("--calib_dir", type=str, default="detection/data/val_images",
                         help="校准图像目录")
     parser.add_argument("--calib_num", type=int, default=100,
                         help="校准样本数量（默认 100）")

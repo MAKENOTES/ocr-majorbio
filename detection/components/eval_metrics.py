@@ -297,7 +297,7 @@ def evaluate_detection(model, val_dataset, device,
     # 我们需要一个不带 GenerateGT 和 ToTensor 的 transform
     # 来获取 ResizeAndPad 后的 quads。
     # 方案：直接用 val_dataset 的原始数据，手动走 transform 拿中间结果。
-    from transforms import ResizeAndPad
+    from components.transforms import ResizeAndPad
     from torchvision.transforms import Normalize
     import torchvision.transforms.functional as TF
 
