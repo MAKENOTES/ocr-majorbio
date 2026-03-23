@@ -35,7 +35,7 @@ NUM_CHANNELS = 1    # 1=灰度, 3=RGB
 
 # 3. 训练超参数
 BATCH_SIZE = 64     # 适当调整
-EPOCHS = 500
+EPOCHS = 680
 LEARNING_RATE = 3e-4
 NUM_WORKERS = 4
 

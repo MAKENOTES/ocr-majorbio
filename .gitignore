@@ -13,6 +13,8 @@ detection/runs/
 recognition/data/
 recognition/runs/
 recognition/checkpoints/
+recognition_quantized_model_bak/
+
 #优化的模型文件
 best_detection.onnx
 best_detection.onnx.data

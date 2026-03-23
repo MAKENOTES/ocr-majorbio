@@ -29,6 +29,7 @@ from recognition.components.dataset import InferenceDataset, dynamic_padding_col
 # ============================================================
 
 DEFAULT_MODEL_PATH  = "best_recognition.onnx"
+# DEFAULT_MODEL_PATH  = "quantized_model/int8/crnn_int8.xml"
 DEFAULT_IMAGE_PATH  = "recognition/data/test_images"
 DEFAULT_KEYS_PATH   = "recognition/keys.txt"
 
