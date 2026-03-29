@@ -225,7 +225,7 @@ def main():
     # --- 模型、损失函数和优化器 ---
     model = EASTModel(pretrained=True).to(device)
     # model.load_state_dict(torch.load("detection/checkpoints/best_detection_490_loss_0.0880.pth"))
-    criterion = EASTLoss().to(device)
+    criterion = EASTLoss(lambda_iou = 3).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = OneCycleLR(optimizer, max_lr=3e-4,
                            steps_per_epoch=len(train_loader),

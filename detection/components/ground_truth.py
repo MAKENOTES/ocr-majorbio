@@ -26,7 +26,9 @@ def shrink_polygon(poly, r=0.4):
 
     # 限制 d 不能超过最短边的一半，否则多边形会消失或翻转
     # 留 1 个像素的余地，保证至少有 mask 存在
-    max_d = (min_side - 1.0) / 2.0
+    # max_d = (min_side - 1.0) / 2.0
+    # input_size 由1024改成640  原来  max_d = (min_side - 1.0) / 2.0   其中1.0 时常量，改成  max_d = min_side * 0.45 可以适配640。解决上下两行仅出一个框问题
+    max_d = min_side * 0.45
 
     # 如果 max_d <= 0，说明框太小了，甚至不足1px，此时强行保留极小厚度或不收缩
     if max_d < 0:
@@ -90,6 +92,14 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
     for quad in quads:
         scaled_quad = quad * score_map_scale
 
+        # area_ratio = (img_h * img_w) / (1024 * 1024)
+        # area = cv2.contourArea(scaled_quad.astype(np.int32))
+        # if area < 10 * area_ratio:
+        #     shrunk_quad = scaled_quad
+        # elif area < 50 * area_ratio:
+        #     shrunk_quad = shrink_polygon(scaled_quad, r=0.8)
+        # else:
+        #     shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
         shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
 
         mask = np.zeros((score_map_h, score_map_w), dtype=np.uint8)

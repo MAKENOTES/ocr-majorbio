@@ -24,14 +24,17 @@ from models.east_model import EASTModel
 from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_detection_epoch_592_loss_0.00982_resnet18_640.pth"
-IMAGE_PATH = "detection/data/test/2"
-OUTPUT_DIR = "detection/data/test_results/resnet18"
+MODEL_PATH = "detection/checkpoints/detection_epoch_624_resnet_0.0099_640.pth"
+IMAGE_PATH = "detection/data/test/5"
+OUTPUT_DIR = "detection/data/test_results/resnet18/5"
 
 SAVE_CROPS = True
 CROP_DIR_NAME = "detection/data/crops/20260131_v2"
 
-EXPAND_BOX = True
+SAVE_LABELS = False
+LABEL_DIR = "detection/data/test_results/resnet18/5"
+
+EXPAND_BOX = False
 EXPAND_RATIO_W = 0.30   # 左右扩充 = 字高 * 0.3
 EXPAND_RATIO_H = 0.10   # 上下扩充 = 字高 * 0.1
 
@@ -164,7 +167,8 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
 
 def detect(model, image_path, output_dir, input_size=640, score_threshold=0.7,
-           save_crops=False, expand_box=False, ratio_w=0.0, ratio_h=0.0):
+           save_crops=False, expand_box=False, ratio_w=0.0, ratio_h=0.0,
+           save_labels=False):
     device = next(model.parameters()).device
 
     img_tensor, resized_image, (orig_w, orig_h) = preprocess_image(image_path, input_size)
@@ -252,6 +256,42 @@ def detect(model, image_path, output_dir, input_size=640, score_threshold=0.7,
 
     save_path = os.path.join(output_dir, "res_" + filename_full)
     cv2.imwrite(save_path, img_vis)
+
+    # ── 生成 label 文件 ──────────────────────────────────
+    if save_labels and len(final_boxes) > 0:
+        if not os.path.exists(LABEL_DIR):
+            os.makedirs(LABEL_DIR)
+
+        sorted_indices = np.argsort(final_boxes[:, 1])
+        sorted_boxes   = final_boxes[sorted_indices]
+
+        label_lines = []
+        for box in sorted_boxes:
+            x_min, y_min, x_max, y_max = box
+
+            if expand_box:
+                h_box  = y_max - y_min
+                dx     = h_box * ratio_w
+                dy     = h_box * ratio_h
+                x_min -= dx
+                x_max += dx
+                y_min -= dy
+                y_max += dy
+
+            real_x_min = max(0.0,        (x_min - pad_x) / scale)
+            real_y_min = max(0.0,        (y_min - pad_y) / scale)
+            real_x_max = min(float(real_w), (x_max - pad_x) / scale)
+            real_y_max = min(float(real_h), (y_max - pad_y) / scale)
+
+            if real_x_max - real_x_min <= 0 or real_y_max - real_y_min <= 0:
+                continue
+
+            label_lines.append(f"{real_x_min:.1f} {real_y_min:.1f} {real_x_max:.1f} {real_y_max:.1f}")
+
+        label_path = os.path.join(LABEL_DIR, f"gt_{filename_no_ext}.txt")
+        with open(label_path, 'w') as f:
+            f.write('\n'.join(label_lines) + '\n')
+        print(f"  -> label 已保存: {label_path} ({len(label_lines)} 行)")
     print(f"[{filename_full}] (原图: {real_w}x{real_h}) 检测到 {len(final_boxes)} 个文本框")
 
 
@@ -267,6 +307,9 @@ def main():
     print(f"阈值:           {SCORE_THRESHOLD}")
     print(f"最小面积:       {MIN_AREA} px")
     print(f"小符号面积上限: {SMALL_REGION_AREA} px")
+    print(f"生成 label:     {SAVE_LABELS}")
+    if SAVE_LABELS:
+        print(f"label 目录:     {LABEL_DIR}")
     print("-" * 30)
 
     if not os.path.exists(MODEL_PATH):
@@ -290,12 +333,14 @@ def main():
         for img_file in sorted(image_files):
             detect(model, img_file, OUTPUT_DIR, INPUT_SIZE, SCORE_THRESHOLD,
                    save_crops=SAVE_CROPS, expand_box=EXPAND_BOX,
-                   ratio_w=EXPAND_RATIO_W, ratio_h=EXPAND_RATIO_H)
+                   ratio_w=EXPAND_RATIO_W, ratio_h=EXPAND_RATIO_H,
+                   save_labels=SAVE_LABELS)
 
     elif os.path.isfile(IMAGE_PATH):
         detect(model, IMAGE_PATH, OUTPUT_DIR, INPUT_SIZE, SCORE_THRESHOLD,
                save_crops=SAVE_CROPS, expand_box=EXPAND_BOX,
-               ratio_w=EXPAND_RATIO_W, ratio_h=EXPAND_RATIO_H)
+               ratio_w=EXPAND_RATIO_W, ratio_h=EXPAND_RATIO_H,
+               save_labels=SAVE_LABELS)
     else:
         print(f"错误: 路径不存在 -> {IMAGE_PATH}")
 

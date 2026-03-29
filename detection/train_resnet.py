@@ -29,7 +29,7 @@ VAL_INTERVAL = 10              # 前期：每 10 个 epoch 验证一次
 START_DENSE_VAL_EPOCH = 50     # 策略切换点：从第 50 epoch 开始每个 epoch 都验证
 
 # --- 早停参数 ---
-EARLY_STOP_PATIENCE = 40       # 连续 40 次验证没有改善就停止
+EARLY_STOP_PATIENCE = 100       # 连续 40 次验证没有改善就停止
                                # 前 50 epoch 每 10 epoch 验证一次，之后每 epoch 验证
                                # 所以实际容忍约 40 个 epoch 不改善
 EARLY_STOP_MIN_DELTA = 1e-5    # 改善幅度小于此值不算改善
@@ -215,7 +215,7 @@ def main():
     # --- 模型、损失函数和优化器 ---
     model = EASTModel(pretrained=True).to(device)
     # model.load_state_dict(torch.load("detection/checkpoints/best_detection_490_loss_0.0880.pth"))
-    criterion = EASTLoss(lambda_iou = 3).to(device)
+    criterion = EASTLoss(lambda_iou = 5).to(device)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = OneCycleLR(optimizer, max_lr=3e-4,
                            steps_per_epoch=len(train_loader),

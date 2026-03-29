@@ -46,8 +46,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ============================================================
 
 DEFAULT_MODEL_PATH  = "best_detection_int8_static.onnx"
-DEFAULT_IMAGE_PATH  = "detection/data/test/2"
-DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized"
+DEFAULT_IMAGE_PATH  = "detection/data/test/5"
+DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized/5"
 DEFAULT_CROP_DIR    = "detection/data/crops/optimized"
 
 INPUT_SIZE          = 640
@@ -56,7 +56,7 @@ MIN_AREA            = 2
 
 SAVE_CROPS          = False
 EXPAND_BOX          = True
-EXPAND_RATIO_W      = 0.30
+EXPAND_RATIO_W      = 0.10
 EXPAND_RATIO_H      = 0.10
 SMALL_REGION_AREA     = 6    # 面积 < 此值视为小符号，走不同出框策略
 # 注意：宽高比过滤只用于小连通域噪点过滤，大连通域不受限制

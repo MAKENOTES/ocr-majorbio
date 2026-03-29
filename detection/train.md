@@ -123,3 +123,17 @@
 
 
 20260321   resnet50 ，1024 分辨率 更多指标训练脚步  一次
+
+    训练因早停在 Epoch 249 结束
+    最佳模型: Epoch 209, Val Loss: 0.05013
+    Top-3 模型:
+      1. best_detection_epoch_209_loss_0.05013.pth (Loss: 0.05013)
+      2. best_detection_epoch_207_loss_0.05295.pth (Loss: 0.05295)
+      3. best_detection_epoch_247_loss_0.05319.pth (Loss: 0.05319)
+
+    --- 最终检测评估 (使用当前模型) ---
+      Precision: 0.9837
+      Recall:    0.9924
+      F1:        0.9880
+      Avg IoU:   0.8825
+      TP=4283  FP=71  FN=33
