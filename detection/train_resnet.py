@@ -15,7 +15,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 # --- 超参数 ---
 LEARNING_RATE =  1e-4  #1e-5 1e-4 3e-5
 BATCH_SIZE = 4 # 根据你的 GPU 显存调整
-EPOCHS = 630
+EPOCHS = 680
 INPUT_SIZE = 640
 TRAIN_IMAGE_DIR = "detection/data/train_images"
 TRAIN_LABEL_DIR = "detection/data/train_labels"

@@ -24,9 +24,11 @@ from models.east_model import EASTModel
 from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/detection_epoch_680.pth"
+MODEL_PATH = "detection/checkpoints/detection_epoch_642_97_resnet18_640.pth"
 IMAGE_PATH = "detection/data/test/5"
+# IMAGE_PATH = "detection/data/val_images"
 OUTPUT_DIR = "detection/data/test_results/resnet18/5"
+# OUTPUT_DIR = "detection/data/test_results/resnet18/val_images"
 
 SAVE_CROPS = True
 CROP_DIR_NAME = "detection/data/crops/20260131_v2"
@@ -113,7 +115,7 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
     binary_high = (score_map_np > score_threshold).astype(np.uint8)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        binary_high, connectivity=8
+        binary_high, connectivity=4
     )
 
     for label_id in range(1, num_labels):
