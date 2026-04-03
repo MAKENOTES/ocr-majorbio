@@ -118,22 +118,9 @@
 
 
 
-    总结：
-        1、input_size 由1024改成640  原来  max_d = (min_side - 1.0) / 2.0   其中1.0 时常量，改成  max_d = min_side * 0.45 可以适配640。解决上下两行仅出一个框问题
+总结：
+    1、input_size 由1024改成640  原来  max_d = (min_side - 1.0) / 2.0   其中1.0 时常量，改成  max_d = min_side * 0.45 可以适配640。解决上下两行仅出一个框问题
+    2、1024改成640 注意推理脚本 SMALL_REGION_AREA  从15改成6  后面这个参数做成动态的
+    3、在推理脚本中  num_labels, labels, stats, _ = cv2.connectedComponentsWithStats( binary_high, connectivity=4)  其中connectivity 如果是8会出现 两个对角框变成一个框。
 
 
-20260321   resnet50 ，1024 分辨率 更多指标训练脚步  一次
-
-    训练因早停在 Epoch 249 结束
-    最佳模型: Epoch 209, Val Loss: 0.05013
-    Top-3 模型:
-      1. best_detection_epoch_209_loss_0.05013.pth (Loss: 0.05013)
-      2. best_detection_epoch_207_loss_0.05295.pth (Loss: 0.05295)
-      3. best_detection_epoch_247_loss_0.05319.pth (Loss: 0.05319)
-
-    --- 最终检测评估 (使用当前模型) ---
-      Precision: 0.9837
-      Recall:    0.9924
-      F1:        0.9880
-      Avg IoU:   0.8825
-      TP=4283  FP=71  FN=33

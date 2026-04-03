@@ -31,19 +31,19 @@ OUTPUT_DIR = "detection/data/test_results/resnet18/5"
 # OUTPUT_DIR = "detection/data/test_results/resnet18/val_images"
 
 SAVE_CROPS = True
-CROP_DIR_NAME = "detection/data/crops/20260131_v2"
+CROP_DIR_NAME = "detection/data/crops/resnet18/5"
 
 SAVE_LABELS = False
 LABEL_DIR = "detection/data/test_results/resnet18/complement"
 
 EXPAND_BOX = False
-EXPAND_RATIO_W = 0.30   # 左右扩充 = 字高 * 0.3
+EXPAND_RATIO_W = 0.10   # 左右扩充 = 字高 * 0.3
 EXPAND_RATIO_H = 0.10   # 上下扩充 = 字高 * 0.1
 
 INPUT_SIZE = 640
 SCORE_THRESHOLD       = 0.7   # 文本行阈值
 MIN_AREA              = 2     # 最小连通域面积（score map 像素数），从 5 降到 2
-SMALL_REGION_AREA     = 6    # 面积 < 此值视为小符号，走不同出框策略
+SMALL_REGION_AREA     = round(15 * (INPUT_SIZE / 1024) ** 2)    # 面积 < 此值视为小符号，走不同出框策略
 # 注意：宽高比过滤只用于小连通域噪点过滤，大连通域不受限制
 SMALL_MAX_ASPECT      = 5   # 小连通域宽高比超过此值才过滤（正方形符号宽高比应接近1）
 

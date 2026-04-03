@@ -271,7 +271,7 @@ def boxes_from_connected_components(score_map_np, geo_map_np, score_threshold,
 
     binary = (score_map_np > score_threshold).astype(np.uint8)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        binary, connectivity=8
+        binary, connectivity=4
     )
 
     for label_id in range(1, num_labels):
