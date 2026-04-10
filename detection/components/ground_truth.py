@@ -100,7 +100,7 @@ def generate_ground_truth(image_size, quads, score_map_scale=0.25):
         #     shrunk_quad = shrink_polygon(scaled_quad, r=0.8)
         # else:
         #     shrunk_quad = shrink_polygon(scaled_quad, r=0.2)
-        shrunk_quad = shrink_polygon(scaled_quad, r=0.4)
+        shrunk_quad = shrink_polygon(scaled_quad, r=0.35)
 
         mask = np.zeros((score_map_h, score_map_w), dtype=np.uint8)
         cv2.fillPoly(mask, [shrunk_quad.astype(np.int32)], 1)
