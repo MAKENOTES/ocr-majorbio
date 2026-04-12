@@ -138,24 +138,31 @@ class RandomHorizontalCrop:
         if np.random.random() > 0.5:  # 50% 概率执行
             return sample
 
+        if quads.size == 0 or len(quads.shape) != 3:
+            return sample
+
         w, h = image.size
         ratio = np.random.uniform(*self.crop_ratio_range)
         new_w = int(w * ratio)
         x_offset = np.random.randint(0, max(1, w - new_w))
 
-        image = image.crop((x_offset, 0, x_offset + new_w, h))
+        cropped_image = image.crop((x_offset, 0, x_offset + new_w, h))
 
-        if quads.size > 0 and len(quads.shape) == 3:
-            quads[:, :, 0] -= x_offset
-            # 保留中心仍在裁剪区域内的框
-            centers_x = quads[:, :, 0].mean(axis=1)
-            keep = (centers_x > 0) & (centers_x < new_w)
-            quads = quads[keep]
-            if quads.size > 0:
-                quads[:, :, 0] = np.clip(quads[:, :, 0], 0, new_w)
+        new_quads = quads.copy()
+        new_quads[:, :, 0] -= x_offset
+        # 保留中心仍在裁剪区域内的框
+        centers_x = new_quads[:, :, 0].mean(axis=1)
+        keep = (centers_x > 0) & (centers_x < new_w)
+        new_quads = new_quads[keep]
 
-        sample['image'] = image
-        sample['quads'] = quads if quads.size > 0 else np.array([], dtype=np.float32)
+        # 裁剪后没有框了，放弃本次裁剪，返回原样本
+        if new_quads.size == 0:
+            return sample
+
+        new_quads[:, :, 0] = np.clip(new_quads[:, :, 0], 0, new_w)
+
+        sample['image'] = cropped_image
+        sample['quads'] = new_quads
         return sample
 
 class ToTensor:
@@ -196,7 +203,7 @@ def get_transforms(is_train=True, input_size=512):
     if is_train:
         return transforms.Compose([
             ColorJitterTransform(),
-            RandomScale(scale_range=(0.6, 1.4)),
+            RandomScale(scale_range=(0.8, 1.2)),
             RandomHorizontalCrop(crop_ratio_range=(0.7, 1.0)),
             ResizeAndPad(input_size),
             GenerateGT(input_size),

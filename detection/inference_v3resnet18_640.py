@@ -24,7 +24,7 @@ from models.east_model import EASTModel
 from components.transforms import ResizeAndPad
 
 # --- 配置参数 ---
-MODEL_PATH = "detection/checkpoints/best_detection_epoch_608_loss_0.01305.pth"
+MODEL_PATH = "detection/checkpoints/detection_epoch_618.pth"
 IMAGE_PATH = "detection/data/test/5"
 # IMAGE_PATH = "detection/data/val_images"
 OUTPUT_DIR = "detection/data/test_results/resnet18/5"
