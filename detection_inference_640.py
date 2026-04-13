@@ -46,9 +46,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ============================================================
 
 DEFAULT_MODEL_PATH  = "best_detection_int8_static.onnx"
-DEFAULT_IMAGE_PATH  = "detection/data/test/5"
-DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized/5"
-DEFAULT_CROP_DIR    = "detection/data/crops/optimized"
+DEFAULT_IMAGE_PATH  = "detection/data/test/1"
+DEFAULT_OUTPUT_DIR  = "detection/data/test_results/optimized/1"
+DEFAULT_CROP_DIR    = "detection/data/crops/optimized/1"
 
 INPUT_SIZE          = 640
 SCORE_THRESHOLD     = 0.7
