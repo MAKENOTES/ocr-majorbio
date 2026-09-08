@@ -17,6 +17,10 @@ from torchvision import transforms
 # 防止截断报错 (针对超大图)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+# MobileFeatureExtractor 在宽度方向的理论感受野约为 53 像素。
+# 为最宽样本额外保留右侧白色上下文，避免其有效末端特征因批次画布边界而变化。
+CNN_RIGHT_CONTEXT = 32
+
 
 # ==========================================
 # 1. 采样与整理工具 (无需修改，完全通用)
@@ -87,8 +91,10 @@ def dynamic_padding_collate_fn(batch):
     # 记录每张图片的真实宽度
     img_widths = torch.IntTensor([img.shape[2] for img in images])
 
-    # 找到当前 Batch 中最宽的宽度
+    # 找到当前 Batch 中最宽的宽度，并额外保留固定的右侧白色上下文。
+    # img_widths 仍保存原始有效宽度，新增上下文不会进入 CTC 或 RNN 有效长度。
     max_width = max(img_widths).item()
+    max_width += CNN_RIGHT_CONTEXT
 
     # 宽度补齐到 8 的倍数
     max_width = ((max_width + 7) // 8) * 8

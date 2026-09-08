@@ -17,7 +17,7 @@ if project_root not in sys.path:
 
 from recognition.components.converter import LabelConverter
 from recognition.components.dataset import create_dataloader
-from recognition.models.model import CRNN
+from recognition.models.model import CRNN, calculate_cnn_output_widths
 import Levenshtein
 
 # ================= 配置区域 =================
@@ -26,7 +26,8 @@ TRAIN_ANNOTATION = "recognition/data/train_annotation.txt"
 # VALID_ANNOTATION = "recognition/data/val_annotation.txt" # 这个里面是从train_annotation取出来的
 VALID_ANNOTATION = "recognition/data/train_annotation.txt" #没有验证数据
 KEYS_PATH = "recognition/keys.txt"
-CHECKPOINT_DIR = "recognition/checkpoints/"
+CHECKPOINT_DIR = "recognition/checkpoints/0831/"
+CHECKPOINT_PREFIX = "fulltrain"
 
 # 2. 数据与模型参数
 IMG_HEIGHT = 32
@@ -75,7 +76,10 @@ def evaluate(model, dataloader, converter, criterion):
             length = length.to(DEVICE)
 
             # 用每张图片的真实宽度计算各自的时间步数（而非统一用最大值）
-            preds_size = (img_widths // 4).clamp(min=1).int()
+            preds_size = calculate_cnn_output_widths(img_widths).clamp(
+                min=1,
+                max=preds.size(0),
+            ).int()
 
             loss = criterion(preds, text, preds_size, length)
             # 处理 NaN 或 Inf
@@ -126,6 +130,9 @@ def train():
 
     if not os.path.exists(CHECKPOINT_DIR):
         os.makedirs(CHECKPOINT_DIR)
+
+    run_time = time.strftime("%m%d_%H%M%S")
+    run_name = f"{CHECKPOINT_PREFIX}_{run_time}"
 
     # TensorBoard 日志
     writer = SummaryWriter(log_dir=f"recognition/runs/ocr_exp_{int(time.time())}")
@@ -211,7 +218,10 @@ def train():
             length = length.to(DEVICE)
 
             # 用每张图片的真实宽度计算各自的时间步数
-            preds_size = (img_widths // 4).clamp(min=1).int()
+            preds_size = calculate_cnn_output_widths(img_widths).clamp(
+                min=1,
+                max=preds.size(0),
+            ).int()
 
             # 3. Compute Loss
             loss = criterion(preds, text, preds_size, length)
@@ -265,7 +275,10 @@ def train():
 
             # 策略 1: 周期性保存 (Backup)
             if epoch % SAVE_INTERVAL == 0:
-                ckpt_path = os.path.join(CHECKPOINT_DIR, f"epoch_{epoch}.pth")
+                ckpt_path = os.path.join(
+                    CHECKPOINT_DIR,
+                    f"{run_name}_epoch_{epoch}.pth",
+                )
                 torch.save(model.state_dict(), ckpt_path)
                 print(f"  [保存] 周期性备份: {ckpt_path}")
 
@@ -281,7 +294,10 @@ def train():
                     should_save_best = True
 
                 if should_save_best:
-                    best_name = f"{int(time.time())}best_cer_{scheduler_metric:.4f}_epoch_{epoch}.pth"
+                    best_name = (
+                        f"{run_name}_best_cer_{scheduler_metric:.4f}_"
+                        f"epoch_{epoch}.pth"
+                    )
                     best_path = os.path.join(CHECKPOINT_DIR, best_name)
 
                     torch.save(model.state_dict(), best_path)

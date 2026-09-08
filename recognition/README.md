@@ -15,6 +15,7 @@
 | 文件 | 作用 |
 | --- | --- |
 | `recognition/train.py` | 训练主循环、验证、CER/Accuracy、调度、日志和模型保存 |
+| `recognition/finetune_dongfen.py` | 针对“董雰”误识别为“董雱”的定向过采样微调 |
 | `recognition/components/dataset.py` | 标注读取、图片预处理、bucket sampling、动态 padding |
 | `recognition/components/converter.py` | 字符字典加载、标签编码和 CTC 贪心解码 |
 | `recognition/models/model.py` | Mobile CNN、padding mask、BiGRU 和分类头 |
@@ -26,6 +27,15 @@
 source .venv/bin/activate
 python recognition/train.py
 ```
+
+仅针对“董雰”进行定向微调时运行：
+
+```bash
+python recognition/finetune_dongfen.py
+```
+
+微调脚本固定加载 `0828` 下 CER 为 `0.0020` 的 epoch 678 权重，输出到
+`recognition/checkpoints/0828/finetune/`，不会覆盖原始 `fulltrain_0828_*` 文件。
 
 训练前应确认训练标注、独立验证标注、图片路径和 `keys.txt` 都有效。当前入口不会在启动时统一执行这些检查，部分缺失问题只会在数据加载或迭代时暴露。
 
@@ -190,8 +200,8 @@ new_width = int(original_width * scale)
 `dynamic_padding_collate_fn()` 对每个 batch：
 
 1. 记录每张图片 padding 前的真实宽度 `img_widths`。
-2. 找到当前 batch 最大宽度。
-3. 将最大宽度向上补齐到 8 的倍数。
+2. 找到当前 batch 最大宽度，并增加 32 像素右侧 CNN 上下文。
+3. 将画布宽度向上补齐到 8 的倍数。
 4. 创建值为 `1.0` 的白色背景张量。
 5. 将每张图片左对齐写入画布。
 
@@ -238,17 +248,18 @@ flowchart LR
 -> [T,B,num_classes]
 ```
 
-### 5.1 有效宽度 Mask
+### 5.1 严格变长序列处理
 
-`CRNN.forward(input, img_widths)` 通过 `_calc_cnn_output_width()` 精确计算每张图片的有效时间步：
+`CRNN.forward(input, img_widths)` 通过统一函数精确计算每张图片的有效时间步：
 
-1. 根据 Stem 卷积公式计算一次宽度。
-2. 根据 MaxPool 公式再计算一次宽度。
-3. 将结果限制到 `[1, batch_seq_len]`。
-4. 在 GRU 前把 padding 时间步的 CNN 特征置 0。
+1. 使用 `(img_widths + 1) // 4` 计算 CNN 有效长度。
+2. 将结果限制到 `[1, batch_seq_len]`。
+3. 使用 `pack_padded_sequence()` 让双向 GRU 严格忽略 padding 时间步。
+4. 使用 `pad_packed_sequence()` 恢复批量输出形状。
 5. 在分类头后将 padding 位置设置为 blank 概率最高。
 
-该 mask 避免反向 GRU 从右侧 padding 区域传播无效特征，并使贪心解码忽略 padding。
+额外的右侧白色上下文保证 CNN 有效末端不会碰到批次画布边界；PackedSequence
+保证反向 GRU 从每张图片自己的有效末端开始计算。
 
 ## 6. 标签编码与 CTC Loss
 
@@ -271,7 +282,7 @@ flowchart TD
 当前训练脚本使用：
 
 ```text
-preds_size = (img_widths // 4).clamp(min=1)
+preds_size = calculate_cnn_output_widths(img_widths).clamp(min=1)
 ```
 
 作为每个样本的 CTC input length；target length 由每条原始标签的字符数给出。`CTCLoss` 使用 `zero_infinity=True`，当输入时间步不足导致无限损失时会将该损失及梯度置零。
@@ -306,7 +317,7 @@ preds_size = (img_widths // 4).clamp(min=1)
 2. 读取 `(images, labels, img_widths)` 并将图片、宽度移到设备。
 3. `model(images, img_widths=img_widths)` 得到 `[T,B,C]` 的 log probability。
 4. `converter.encode(labels)` 得到拼接 target 和 target length。
-5. 使用 `img_widths // 4` 得到 CTC input length。
+5. 使用统一的 `calculate_cnn_output_widths()` 得到 CTC input length。
 6. 计算 CTC Loss。
 7. `optimizer.zero_grad()` 清空梯度。
 8. `loss.backward()` 反向传播。
@@ -430,7 +441,6 @@ tensorboard --logdir=recognition/runs
 | 风险 | 当前行为 | 影响 |
 | --- | --- | --- |
 | 训练与验证数据泄漏 | `TRAIN_ANNOTATION` 和 `VALID_ANNOTATION` 指向同一文件 | 验证 CER/Accuracy 不能代表泛化能力；且同一图片在训练和验证使用不同增强 |
-| CTC 长度公式不完全统一 | train/evaluate 使用 `img_widths // 4`，模型 mask 使用 `_calc_cnn_output_width()` | 某些宽度余数下可能少算有效时间步，影响长标签 loss |
 | 非有限 loss 检查太晚 | `backward()` 和 `optimizer.step()` 后才检查 | NaN/Inf 可能已污染参数和优化器状态 |
 | 坏图返回 dummy | 图片读取异常时返回 `[C,32,8]` 全 1 张量，但保留原标签 | 无效图片与长标签组合可能产生零 loss 或错误监督 |
 | `IMG_WIDTH` 未实际限宽 | 参数只为兼容保留 | 极宽图片可能导致显存峰值或 OOM |

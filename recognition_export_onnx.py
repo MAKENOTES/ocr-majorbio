@@ -6,12 +6,14 @@ recognition_export_onnx.py — 将训练好的 CRNN PyTorch 模型导出为 ONNX
      hidden state 形状不匹配，反向 GRU 输出错乱 → 字符重复（如 "乙乙方"）
   2. ONNX 不支持 img_widths 的 Python for-loop 动态计算，
      改用纯 tensor 算术使 padding mask 可导出
+  3. 双向 GRU 处理完整批次宽度时，反向状态会受到 padding 时间步影响
 
 解决方案:
   用 OnnxExportWrapper 包装原始模型:
   - h0 改为由输入 batch 维度动态构建（expand 而非 zeros(b,...)）
   - img_widths 作为第二个输入传入 ONNX，padding mask 全部用 tensor 运算
-  - CNN 宽度下采样公式用 torch 算术替代 Python int 循环
+  - CNN 宽度下采样调用训练和 PyTorch 推理共用的纯 tensor 函数
+  - 使用成对的 pack/pad 操作让双向 GRU 严格忽略 padding 时间步
 
 用法:
     python recognition_export_onnx.py
@@ -22,6 +24,7 @@ recognition_export_onnx.py — 将训练好的 CRNN PyTorch 模型导出为 ONNX
 
 import torch
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import os
 import numpy as np
 
@@ -29,7 +32,7 @@ import numpy as np
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from recognition.models.model import CRNN
+from recognition.models.model import CRNN, calculate_cnn_output_widths
 from recognition.components.converter import LabelConverter
 
 
@@ -40,8 +43,8 @@ class OnnxExportWrapper(torch.nn.Module):
     解决两个核心问题:
     1. h0 动态化: 用 expand 从 [num_layers*2, 1, hidden] 广播到任意 batch，
        避免 trace 时 batch 维度被烧死为常量。
-    2. img_widths 支持: 将 _calc_cnn_output_width 的 Python 循环
-       替换为纯 tensor 算术，使 padding mask 对 ONNX 可见。
+    2. img_widths 支持: 使用统一的纯 tensor 宽度计算，并通过 PackedSequence
+       让双向 GRU 严格忽略 padding 时间步。
     """
 
     def __init__(self, crnn_model: CRNN):
@@ -62,28 +65,16 @@ class OnnxExportWrapper(torch.nn.Module):
             torch.zeros(num_layers * num_directions, 1, hidden_size)
         )
 
-    @staticmethod
-    def _calc_cnn_width_tensor(pixel_widths: torch.Tensor) -> torch.Tensor:
-        """
-        纯 tensor 运算版本的 CNN 宽度下采样计算。
-        对应 MobileFeatureExtractor: stem(s=2,p=1,k=3) → pool(k=2,s=2)
-
-        stem: w = floor((W + 2*1 - 3) / 2) + 1 = floor((W - 1) / 2) + 1
-        pool: w = floor((w_stem - 2) / 2) + 1
-        """
-        # stem: Conv2d(k=3, s=2, p=1)
-        w = (pixel_widths + 2 * 1 - 3) // 2 + 1
-        # pool: MaxPool2d(k=2, s=2)
-        w = (w - 2) // 2 + 1
-        return w
-
     def forward(self, input: torch.Tensor, img_widths: torch.Tensor) -> torch.Tensor:
         """
+        执行用于 ONNX 导出的变长序列前向传播。
+
         Args:
-            input:      [B, C, 32, W] 图像张量（含 padding）
-            img_widths: [B] 每张图片 padding 前的真实像素宽度 (int32/int64)
+            input: 形状为 ``[B, C, 32, W]`` 的图片张量，包含批量填充。
+            img_widths: 形状为 ``[B]`` 的有效像素宽度。
+
         Returns:
-            output:     [SeqLen, B, NumClasses] log_softmax
+            形状为 ``[SeqLen, B, NumClasses]`` 的 CTC 对数概率。
         """
         # ---- CNN ----
         conv = self.cnn(input)           # [B, 256, 1, W/4]
@@ -98,27 +89,31 @@ class OnnxExportWrapper(torch.nn.Module):
         # expand 不分配新内存，ONNX 能正确处理动态 batch 维
         h0 = self.h0_template.expand(-1, b, -1).contiguous()
 
-        # ---- Padding Mask（纯 tensor 运算，ONNX 兼容） ----
-        real_seq_lens = self._calc_cnn_width_tensor(img_widths.long())
+        # ---- 统一计算每张图片的 CNN 有效长度 ----
+        real_seq_lens = calculate_cnn_output_widths(img_widths)
         real_seq_lens = real_seq_lens.clamp(min=1, max=seq_len)
 
         # mask: [SeqLen, B]  True = padding 位置
         time_indices = torch.arange(seq_len, device=conv.device).unsqueeze(1)  # [SeqLen, 1]
         padding_mask = time_indices >= real_seq_lens.unsqueeze(0)               # [SeqLen, B]
 
-        # 将 padding 时间步的 CNN 特征置零（阻止反向 GRU 传播噪声）
-        conv = conv.masked_fill(padding_mask.unsqueeze(2), 0.0)
-
-        # ---- GRU ----
-        rnn_out, _ = self.rnn(conv, h0)
+        # ---- 变长 GRU：padding 不参与双向循环状态更新 ----
+        packed_conv = pack_padded_sequence(
+            conv,
+            real_seq_lens.detach().to("cpu"),
+            enforce_sorted=False,
+        )
+        packed_rnn_out, _ = self.rnn(packed_conv, h0)
+        rnn_out, _ = pad_packed_sequence(
+            packed_rnn_out,
+            total_length=seq_len,
+        )
         rnn_out = self.rnn_dropout(rnn_out)
         output = self.embedding(rnn_out)  # [SeqLen, B, n_class]
 
         # 屏蔽 padding 区域的 logits
         # 将 padding 位置所有类别设为 -1e9，blank (idx=0) 设为 0
         mask_expanded = padding_mask.unsqueeze(2)  # [SeqLen, B, 1]
-        blank_score = torch.zeros_like(output)
-        blank_score[:, :, 0] = 0.0  # blank 得分 = 0
         neg_inf = torch.full_like(output, -1e9)
         neg_inf[:, :, 0] = 0.0  # blank 位保持 0
         output = torch.where(mask_expanded, neg_inf, output)
@@ -289,8 +284,8 @@ def export_onnx(model_path: str, output_path: str, keys_path: str,
 
 
 if __name__ == "__main__":
-    model_path = "best_recognition.pth"
-    output_path = "best_recognition.onnx"
+    model_path = "recognition/checkpoints/0831/fulltrain_0831_205615_best_cer_0.0028_epoch_672.pth"
+    output_path = "fulltrain_0831_205615_best_cer_0.0028_epoch_672.onnx"
     keys_path = "recognition/keys.txt"
     img_height = 32
     img_width = 256
