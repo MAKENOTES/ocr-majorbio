@@ -14,6 +14,8 @@ from PIL import Image, ImageFile
 from torch.utils.data import Dataset, DataLoader, Sampler
 from torchvision import transforms
 
+from recognition.utils.normalization_label import normalize_spaces
+
 # 防止截断报错 (针对超大图)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -352,7 +354,10 @@ class TextRecognitionDataset(BaseTextDataset):
                     parts = line.strip().split(',')
                     if len(parts) >= 2:
                         path_part = parts[0].strip()
-                        label_part = ','.join(parts[1:]).strip().replace('"', '')
+                        # 标签统一做空格规一化：删除与中文相邻的排版空格，
+                        # 保留英文内部空格，保证训练监督信号风格一致
+                        label_part = normalize_spaces(
+                            ','.join(parts[1:]).strip().replace('"', ''))
 
                         full_path = os.path.join(annotation_dir, path_part)
                         self.image_paths.append(full_path)

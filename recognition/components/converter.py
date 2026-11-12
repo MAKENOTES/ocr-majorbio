@@ -3,6 +3,8 @@
 """
 import torch
 
+from recognition.utils.normalization_label import normalize_spaces
+
 class LabelConverter:
     """
     在文本标签和用于CTC Loss的整数序列之间进行转换。
@@ -92,6 +94,9 @@ class LabelConverter:
                 if token != 0 and (j == 0 or token != token_seq[j-1].item()):
                     char_list.append(self.idx2char.get(token, ''))
 
-            decoded_texts.append("".join(char_list))
+            # 解码结果统一做空格规一化：
+            # 与中文相邻的排版空格删除，英文内部空格保留，
+            # 与训练标签（TextDataset 加载时规一化）和评估口径保持一致
+            decoded_texts.append(normalize_spaces("".join(char_list)))
 
         return decoded_texts

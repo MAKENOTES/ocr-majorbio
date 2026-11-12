@@ -284,8 +284,8 @@ def export_onnx(model_path: str, output_path: str, keys_path: str,
 
 
 if __name__ == "__main__":
-    model_path = "recognition/checkpoints/0831/fulltrain_0831_205615_best_cer_0.0028_epoch_672.pth"
-    output_path = "fulltrain_0831_205615_best_cer_0.0028_epoch_672.onnx"
+    model_path = "recognition/checkpoints/1111/fulltrain_1111_165616_best_cer_0.0007_epoch_677.pth"
+    output_path = "fulltrain_1111_165616_best_cer_0.0007_epoch_677.onnx"
     keys_path = "recognition/keys.txt"
     img_height = 32
     img_width = 256

@@ -13,9 +13,10 @@ if project_root not in sys.path:
 from recognition.components.converter import LabelConverter
 from recognition.models.model import CRNN
 from recognition.components.dataset import InferenceDataset, dynamic_padding_collate_fn
+from recognition.utils.normalization_label import normalize_spaces
 
 # ================= 配置区域 =================
-MODEL_PATH = "recognition/checkpoints/0831/fulltrain_0831_205615_best_cer_0.0028_epoch_672.pth"  # 修改为你的最佳模型路径
+MODEL_PATH = "recognition/checkpoints/1111/fulltrain_1111_165616_best_cer_0.0007_epoch_677.pth"  # 修改为你的最佳模型路径
 KEYS_PATH = "recognition/keys.txt"
 VAL_ANNOTATION = "recognition/data/train_annotation.txt"  # 验证集标注文件
 
@@ -68,7 +69,9 @@ def main():
             if ',' in line:
                 path_part, label_part = line.strip().split(',', 1)
                 filename = os.path.basename(path_part.strip())
-                filename_to_label[filename] = label_part.strip().replace('"', '')
+                # GT 与解码输出使用同一套空格规一化规则，保证口径一致
+                filename_to_label[filename] = normalize_spaces(
+                    label_part.strip().replace('"', ''))
 
     print(f"加载了 {len(filename_to_label)} 条标注记录")
 
