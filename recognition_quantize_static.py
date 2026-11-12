@@ -84,7 +84,8 @@ class CRNNCalibrationDataset:
     - 灰度读取
     - 高度缩放到 IMG_HEIGHT (32)，宽度等比缩放
     - 归一化到 [0, 1]
-    - 统一 padding 到固定宽度 (max_width)
+    - 画布保持图片自身宽度（与 batch=1 真实推理一致），不再 pad 到固定宽度；
+      max_width 仅作为超宽图片的安全截断上限
 
     NNCF ONNX 后端要求 transform_fn 返回 Dict[str, np.ndarray]，
     key 为模型输入名称。我们的 CRNN ONNX 模型有两个输入:
@@ -121,7 +122,7 @@ class CRNNCalibrationDataset:
         ratio = self.img_height / h_orig
         new_w = max(1, int(w_orig * ratio))
 
-        # 限制宽度不超过 max_width
+        # 超宽图片安全截断（正常数据不会触发）
         if new_w > self.max_width:
             new_w = self.max_width
 
@@ -133,13 +134,9 @@ class CRNNCalibrationDataset:
 
         real_width = new_w
 
-        # Padding 到 max_width
-        if new_w < self.max_width:
-            pad_width = self.max_width - new_w
-            img_np = np.pad(img_np, ((0, 0), (0, 0), (0, pad_width)),
-                            mode='constant', constant_values=0.0)
-
-        # 返回 [1, 32, max_width] (C, H, W)，不含 batch 维
+        # 不再 pad 到固定宽度：画布即图片自身宽度，
+        # 保证激活统计范围与真实推理（动态宽度画布）一致
+        # 返回 [1, 32, new_w] (C, H, W)，不含 batch 维
         # DataLoader(batch_size=1) 会自动添加 batch 维 → [1, 1, 32, W]
         return img_np, np.array([real_width], dtype=np.int64)
 
@@ -193,6 +190,13 @@ def quantize_via_openvino_ir(onnx_model_path, calibration_dir, output_dir,
     ov_model = ov.convert_model(onnx_model_path)
     print(f"  ✓ OpenVINO IR 转换成功")
 
+    # 修复 OpenVINO 2026.0 CPU GRUSequence 无视 sequence_lengths、遍历 padding
+    # 的缺陷（双向反向分支被补边污染，混批推理全量准确率从 ~99.4% 崩至 ~94%）：
+    # 拆双向 GRU 为两个正向 GRU 并只反转有效前缀，手术后再保存 FP32 与量化。
+    from recognition.utils.openvino import make_gru_length_safe
+    ov_model = make_gru_length_safe(ov_model)
+    print(f"  ✓ 长度感知 GRU 图手术完成 (make_gru_length_safe)")
+
     # 打印模型输入输出信息
     for inp in ov_model.inputs:
         print(f"  输入: {inp.any_name}, shape={inp.partial_shape}, dtype={inp.element_type}")
@@ -244,7 +248,7 @@ def quantize_via_openvino_ir(onnx_model_path, calibration_dir, output_dir,
     _sample = next(iter(calibration_loader))
     _check = transform_fn_ov(_sample)
     print(f"  transform_fn 输出验证:")
-    print(f"    input shape:      {_check['input'].shape}  (期望: [1, 1, 32, {max_width}])")
+    print(f"    input shape:      {_check['input'].shape}  (画布=图片自身宽度, 动态可变)")
     print(f"    img_widths shape: {_check['img_widths'].shape}  (期望: [1])")
     assert _check['input'].ndim == 4, f"input 维度错误: {_check['input'].shape}, 期望 4D"
     assert _check['img_widths'].ndim == 1, f"img_widths 维度错误: {_check['img_widths'].shape}, 期望 1D"
